@@ -1,0 +1,25 @@
+.autopagebreak maxdepth:{2}
+.doctype {paged}
+
+.center
+    # Trabajo Practico - Sistemas de Computacion
+
+    **Integrantes:**
+    - Brigido Tomas
+    - Siñuka Javier
+    - Tosolini Agustio
+    
+---
+
+.tableofcontents
+
+---
+
+## Introduccion
+
+El presente trabajo practico se enmarca en el estudio del rendimiento y la performance de los sistemas de computacion, con el objetivo de trasladar conceptos teoricos a un contexto de analisis aplicado. En particular, la actividad propone observar el comportamiento de una computadora desde dos perspectivas complementarias: por un lado, el uso de benchmarks de terceros como herramienta de referencia para comparar alternativas de hardware y fundamentar decisiones tecnicas; por otro, la utilizacion de herramientas de medicion orientadas al analisis de performance de programas propios, con foco en el tiempo de ejecucion y en el costo computacional de las funciones que componen una solucion de software.
+
+Desde el punto de vista de la ingenieria, ambas dimensiones resultan necesarias. El analisis de hardware mediante benchmarks permite interpretar metricas de desempeno en escenarios estandarizados y relacionarlas con criterios concretos de seleccion de componentes. A su vez, el estudio de la performance de codigo introduce una mirada mas cercana al desarrollo de software, ya que no solo interesa que un programa funcione correctamente, sino tambien comprender como utiliza el tiempo de CPU, que partes concentran el mayor costo de ejecucion y que oportunidades de optimizacion pueden identificarse a partir de evidencia experimental.
+
+En este informe se desarrollaran ambas lineas de trabajo de manera ordenada y con caracter tecnico. Se responderan las consignas propuestas por la catedra, se documentara la realizacion del tutorial de *time profiling* mediante capturas de pantalla y se incorporaran conclusiones fundamentadas acerca del comportamiento temporal de las funciones analizadas. De este modo, el trabajo no se limita a presentar resultados aislados, sino que busca construir una interpretacion critica de las mediciones obtenidas y de su utilidad para la toma de decisiones en sistemas de computacion.
+
