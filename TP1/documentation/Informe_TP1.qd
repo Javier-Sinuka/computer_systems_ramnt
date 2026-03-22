@@ -2,44 +2,50 @@
 .doctype {paged}
 
 .center
-    # Trabajo Practico - Sistemas de Computacion
+    # Trabajo Práctico - Sistemas de Computación
 
     **Integrantes:**
-    - Brigido Tomas
+    - Brigido Tomás
     - Siñuka Javier
-    - Tosolini Agustin
-    
+    - Tosolini Agustín 
 ---
+![](../assets/Sello_institucional_V2.png)
 
 .tableofcontents
 
 ---
 
-## Introduccion
+## Introducción
 
-El presente trabajo practico se enmarca en el estudio del rendimiento y la performance de los sistemas de computacion, con el objetivo de trasladar conceptos teoricos a un contexto de analisis aplicado. En particular, la actividad propone observar el comportamiento de una computadora desde dos perspectivas complementarias: por un lado, el uso de benchmarks de terceros como herramienta de referencia para comparar alternativas de hardware y fundamentar decisiones tecnicas; por otro, la utilizacion de herramientas de medicion orientadas al analisis de performance de programas propios, con foco en el tiempo de ejecucion y en el costo computacional de las funciones que componen una solucion de software.
+El presente trabajo práctico se enmarca en el estudio del rendimiento y la performance de los sistemas de computación, con el objetivo de trasladar conceptos teóricos a un contexto de análisis aplicado. En particular, la actividad propone observar el comportamiento de una computadora desde dos perspectivas complementarias: por un lado, el uso de benchmarks de terceros como herramienta de referencia para comparar alternativas de hardware y fundamentar decisiones técnicas; por otro, la utilización de herramientas de medición orientadas al análisis de performance de programas propios, con foco en el tiempo de ejecución y en el costo computacional de las funciones que componen una solución de software.
 
-Desde el punto de vista de la ingenieria, ambas dimensiones resultan necesarias. El analisis de hardware mediante benchmarks permite interpretar metricas de desempeno en escenarios estandarizados y relacionarlas con criterios concretos de seleccion de componentes. A su vez, el estudio de la performance de codigo introduce una mirada mas cercana al desarrollo de software, ya que no solo interesa que un programa funcione correctamente, sino tambien comprender como utiliza el tiempo de CPU, que partes concentran el mayor costo de ejecucion y que oportunidades de optimizacion pueden identificarse a partir de evidencia experimental.
+Desde el punto de vista de la ingeniería, ambas dimensiones resultan necesarias. El análisis de hardware mediante benchmarks permite interpretar métricas de desempeño en escenarios estandarizados y relacionarlas con criterios concretos de selección de componentes. A su vez, el estudio de la performance de código introduce una mirada más cercana al desarrollo de software, ya que no solo interesa que un programa funcione correctamente, sino también comprender cómo utiliza el tiempo de CPU, qué partes concentran el mayor costo de ejecución y qué oportunidades de optimización pueden identificarse a partir de evidencia experimental.
 
-En este informe se desarrollaran ambas lineas de trabajo de manera ordenada y con caracter tecnico. Se responderan las consignas propuestas por la catedra, se documentara la realizacion del tutorial de *time profiling* mediante capturas de pantalla y se incorporaran conclusiones fundamentadas acerca del comportamiento temporal de las funciones analizadas. De este modo, el trabajo no se limita a presentar resultados aislados, sino que busca construir una interpretacion critica de las mediciones obtenidas y de su utilidad para la toma de decisiones en sistemas de computacion.
+En este informe se desarrollarán ambas líneas de trabajo de manera ordenada y con carácter técnico. Se responderán las consignas propuestas por la cátedra, se documentará la realización del tutorial de *time profiling* mediante capturas de pantalla y se incorporarán conclusiones fundamentadas acerca del comportamiento temporal de las funciones analizadas. De este modo, el trabajo no se limita a presentar resultados aislados, sino que busca construir una interpretación crítica de las mediciones obtenidas y de su utilidad para la toma de decisiones en sistemas de computación.
 
 ## Desarrollo
 
 ### Benchmarking de hardware
 
-| **Lista de Benchmarks**|
-|-----------------------|
-| Contenido | 
+| **Lista de Benchmarks** |  |  |
+|-------------------------|--|--|
+| Speedometer 2.0 | Cinebench | Geekbench |
+| 3DMark | Unigine Heaven | CrystalDiskMark |
+| AIDA64 | PCMark | Blender |
+| HandBrake |  |  |
 
-|**Actividad diraria** | **Benchmark asociado** |
+|**Actividad diaria** | **Benchmark asociado** |
 |----------------------|-----------------------|
-| Navegacion web | Speedometer 2.0 |
-
-| **Componente** | **Tomas** | **Agustin** | **Javier** |
-|----------------|------------------|------------------|------------------|
-| Procesador     | Intel(R) Core(TM) i7-10700F CPU @ 2.90GHz | 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz | Intel(R) Core(TM) i7-10510U CPU @ 1.80GHz |
-| Memoria RAM    | 16 GB DDR4 | 16 GB DDR4 |16 GB DDR4 |
-| Almacenamiento | 256 GB SSD NVMe M.2 | 256Gb GB SSD NVMe | 500 GB SSD NVMe M.2 |
+| Navegación web | Speedometer 2.0 |
+| Compilar, multitarea pesada | Cinebench |
+| Uso general | Geekbench |
+| FPS en juegos | 3DMark |
+| Estabilidad gaming | Unigine Heaven |
+| Carga de apps/juegos | CrystalDiskMark |
+| Multitarea (RAM) | AIDA64 |
+| Experiencia diaria | PCMark |
+| Edición/render | Blender |
+| Exportar videos | HandBrake |
 
 ### Comparativa de Compilación de Linux Kernel
 
@@ -48,5 +54,37 @@ En este informe se desarrollaran ambas lineas de trabajo de manera ordenada y co
 | Intel Core i5-13600K | Raptor Lake (13 Gen) | 14 (6P + 8E) / 20 | ~72 - 76 segundos |
 | AMD Ryzen 9 5900X | Zen 3 (Ryzen 5000) | 12 / 24 | ~82 - 86 segundos |
 
-### Aceleracion Procesador Ryzen 9 7950X
+### Aceleración Procesador Ryzen 9 7950X vs AMD Ryzen 9 5900X 12-Core
 
+| Área             | Aceleración real |
+|------------------|------------------|
+| CPU general      | ~1.5x            |
+| Compilación      | ~1.5x            |
+| Render / edición | ~1.5x - 1.7x     |
+| Gaming           | ~1.1x - 1.4x     |
+| Multitarea       | hasta ~1.8x      |
+
+Pasar de un AMD Ryzen 9 5900X a un AMD Ryzen 9 7950X da un salto de rendimiento importante, pero no en todo por igual. Donde realmente se nota es en tareas pesadas y multitarea: compilar código, renderizar video, streamear mientras programás o tener muchas cosas abiertas al mismo tiempo. Ahí el 7950X puede ser alrededor de un 50% a 70% más rápido y mucho más fluido.
+En cambio, en gaming la mejora existe, pero es bastante más chica, y muchas veces depende más de la placa de video que del procesador.
+
+### Analizando el rendimiento de un programa con la herramienta gprof
+
+A continuación mostramos en detalle los componentes de las computadoras de cada uno de los integrantes del grupo para poder hacer un análisis de los resultados obtenidos.
+
+| **Componente** | **Tomás** | **Agustín** | **Javier** |
+|----------------|------------------|------------------|------------------|
+| Procesador     | Intel(R) Core(TM) i7-10700F CPU @ 2.90GHz | 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz | Intel(R) Core(TM) i7-10510U CPU @ 1.80GHz |
+| Memoria RAM    | 16 GB DDR4 | 16 GB DDR4 |16 GB DDR4 |
+| Almacenamiento | 256 GB SSD NVMe M.2 | 256Gb GB SSD NVMe | 500 GB SSD NVMe M.2 |
+
+Dentro de la sección `scripts/results` se encuentran en detalle los resultados obtenidos por cada uno de los integrantes al utilizar la herramienta `gprof` sobre los scripts solicitados.
+
+| **Tomás** | **Javier** | **Agustín** |
+|-----------|------------|--------------|
+| ![](../assets/tomas.png) | ![](../assets/javier.png) | ![](../assets/agustin.png) |
+
+Como se puede observar, los resultados obtenidos para cada uno de los integrantes son distintos, ya que los componentes de cada computadora no son iguales. Podemos notar que los procesadores más rápidos tienen tiempos más pequeños en cada función, lo que se traduce en un mejor rendimiento.
+
+## Conclusión
+
+En este trabajo práctico se analizaron dos aspectos centrales del rendimiento en sistemas de computación: por un lado, el uso de benchmarks de hardware permitió relacionar métricas de desempeño con actividades concretas como navegación, gaming, compilación y multitarea; por otro, el uso de `gprof` hizo posible estudiar el comportamiento de programas propios y observar cómo las diferencias de hardware influyen en los tiempos de ejecución. En conjunto, el trabajo permitió comprender que el rendimiento depende tanto de los componentes del sistema como del tipo de tarea analizada y de las herramientas utilizadas para medirlo.
