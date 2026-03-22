@@ -2,3 +2,4 @@ scripts/analysis.txt
 scripts/gmon.out
 scripts/test_gprof
 .idea
+output/
