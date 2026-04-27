@@ -1,0 +1,18 @@
+hacer incapie en la direccion de memoria 0x7c00 adjuntado esa parte del codigo en la seccion 
+y en la firma que le pone al ultimo
+
+agregar informacion del compilarycorrer.sh 
+
+comparar objdump con hd
+
+para pasar de modo real a modo protegido hay que modificar un registro
+se llama CR0
+PE {0} -> PROTECTED MODE ENABLE 
+PG {31} -> hABILITA EL PAGINADO 
+
+BIOS YA NO ESTA DISPONIBLE
+MODO VGA -> SECTOR DE MEMORIA QUE ESCRIBIMOS, LO QUE ECRIBIMOS AHIO LO VEMOS EN PANTALLA
+
+pROCESO PARA PASAR A MODO PROTEGIDO:
+Desabilitar interrupciones
+
