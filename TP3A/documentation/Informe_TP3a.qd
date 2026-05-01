@@ -1,0 +1,81 @@
+.autopagebreak maxdepth:{1}
+.doctype {paged}
+
+.center
+    
+    #! Trabajo Práctico 3 - Sistemas de Computación
+    
+    !(600X600)[Alt](../../TP1/assets/Sello_institucional_V2.png)
+    
+    **Integrantes:**
+    - Brigido Tomás
+    - Siñuka Javier
+    - Tosolini Agustín
+
+.tableofcontents
+
+# Introducción
+
+# Trabajo Práctico 1: Exploración del entorno UEFI y la Shell
+
+## Arranque en el entorno virtual
+
+## Exploración de Dispositivos (Handles y Protocolos)
+
+![](../part1_uefi_exploration/img/1.png "output comandos map y ls")
+
+![](../part1_uefi_exploration/img/2.png "output comando dh -b")
+
+Pregunta de Razonamiento 1: Al ejecutar el comando map y dh, vemos protocolos e identificadores en lugar de puertos de hardware fijos. ¿Cuál es la ventaja de seguridad y compatibilidad de este modelo frente al antiguo BIOS?
+
+La ventaja es que esto permite que el firmware sea independiente de la arquitectura del hardware. Al no permitir que las aplicaciones accedan directamente al hardware y forzarlas a usar interfaces (protocolos) controladas por
+el firmware, se reduce la superficie de ataque para código malicioso que intente manipular periféricos de forma directa o no autorizada.
+
+## Análisis de Variables Globales (NVRAM)
+
+![](../part1_uefi_exploration/img/3.png "output comando dmpstore -b parte 1")
+
+![](../part1_uefi_exploration/img/4.png "output comando dmpstore -b parte 2")
+
+![](../part1_uefi_exploration/img/5.png "output comando dmpstore set -v")
+
+Pregunta de Razonamiento 2: Observando las variables Boot#### y BootOrder, ¿cómo determina el Boot Manager la secuencia de arranque?
+
+El orden de ejecución lo define la variable global BootOrder. Esta contiene una lista de los números de las variables Boot####
+
+## Footprinting de Memoria y Hardware
+
+![](../part1_uefi_exploration/img/6.png "output comando memmap -b parte 1")
+
+![](../part1_uefi_exploration/img/7.png "output comando memmap -b parte 2")
+
+
+Pregunta de Razonamiento 3: En el mapa de memoria (memmap), existen regiones marcadas como RuntimeServicesCode. ¿Por qué estas áreas son un objetivo principal para los desarrolladores de malware (Bootkits)?
+
+las áreas de RuntimeServices permanecen activas y residentes en la memoria RAM mientras la computadora está encendida.
+Si el malware se logra alojar en esas regiones puede interceptar llamadas del sistema operativo al firmware incluso después de que el sistema operativo haya cargado. Esto le otorga un nivel de persistencia y control extremadamente alto, permitiéndole sobrevivir a reinstalaciones del sistema operativo o manipular variables de seguridad de bajo nivel de forma invisible.
+
+![](../part1_uefi_exploration/img/8.png "output comando pci -b")
+
+![](../part1_uefi_exploration/img/9.png "output comando drivers -b")
+
+# Trabajo Práctico 2: Desarrollo, compilación y análisis de seguridad
+
+## Desarrollo de la Aplicación
+
+Pregunta de Razonamiento 4: ¿Por qué utilizamos SystemTable->ConOut->OutputString en lugar de la función printf de C?
+
+Se utiliza por que en ese momento nos encontramos en el entorno de UEFI donde no se han cargado las librerias estandar de C y por lo tanto debemos usar protocolos de salida de la SystemTable de UEFI.
+
+## Compilación a Formato PE/COFF
+
+## Análisis de Metadatos y Decompilación
+
+![](../part2_development_compilation_security_analysis/img/1.png "verificacion del tipo de archivo de aplicacion.efi")
+
+Pregunta de Razonamiento 5: En el pseudocódigo de Ghidra, la condición 0xCC suele aparecer como -52. ¿A qué se debe este fenómeno y por qué importa en ciberseguridad?
+
+Aparece como -52 por una interpretacion binaria al ser 1100 1100 se interpreta en complementa a dos, es decir, el 1 mas significativo nos indica que es negativo, luego se invierten los bits y se suma 1 para obtener el valor absoluto,
+haciendo esto se consigue 0011 0100 que es igual a 52.
+Es importante en ciberseguridad dado que representa la INT 3, que es la instruccion en el lenguaje assembler x86/x64 que realiza una pausa en la ejecucion del programa y genera un "breakpoint exception", esto permite realizar diversas inspecciones.
+Ej.: En los exploits por buffer overflow 0xCC se usa a menudo como un marcador para rastrear el flujo de ejecución o asegurar que el código llegue al lugar correcto.
