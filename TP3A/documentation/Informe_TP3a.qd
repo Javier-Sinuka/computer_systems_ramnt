@@ -16,11 +16,34 @@
 
 # Introducción
 
+El presente informe documenta el desarrollo de las partes 1 y 2 del trabajo práctico propuesto en el archivo `Arquitectura .pdf`, centradas en la exploración del entorno UEFI, la interacción con su shell, el análisis de variables y mapas de memoria, y la construcción de una aplicación nativa en dicho entorno.
+
+En la primera parte se analiza cómo UEFI abstrae el hardware mediante handles y protocolos, cómo administra el arranque a través de variables persistentes en NVRAM y qué información expone sobre memoria, buses y controladores antes de cargar un sistema operativo. En la segunda parte se desarrolla una aplicación sencilla en C para ejecutarse como binario UEFI, se compila al formato PE/COFF requerido por el firmware y se inspecciona su comportamiento con herramientas de análisis estático.
+
+La parte 3 del enunciado, correspondiente a la ejecución en hardware físico, no forma parte del presente informe.
+
 # Trabajo Práctico 1: Exploración del entorno UEFI y la Shell
 
 ## Arranque en el entorno virtual
 
+Para iniciar el laboratorio se utilizó `QEMU` junto con `OVMF`, que provee una implementación abierta del firmware UEFI. A diferencia de un arranque legado basado en BIOS, este entorno presenta una shell interactiva, servicios de arranque, servicios de tiempo de ejecución y una base de datos de protocolos que permiten inspeccionar el sistema antes de la carga del sistema operativo.
+
+El arranque en un entorno virtual resulta útil porque permite repetir pruebas de forma controlada, observar el comportamiento del firmware sin depender de una máquina física y validar el flujo de trabajo de exploración y desarrollo en condiciones reproducibles.
+
+```bash
+qemu-system-x86_64 -m 512 -bios /usr/share/ovmf/OVMF.fd -net none
+```
+
 ## Exploración de Dispositivos (Handles y Protocolos)
+
+La exploración inicial se realizó con los comandos `map`, `ls` y `dh -b`. El primero enumera los sistemas de archivos y dispositivos que el firmware expone a la shell, mientras que `dh -b` permite inspeccionar los handles y los protocolos asociados a cada uno. Esto evidencia que UEFI trabaja sobre abstracciones de software en lugar de depender de direcciones o puertos de hardware fijos.
+
+```plaintext
+Shell> map
+Shell> FS0:
+FS0:\> ls
+Shell> dh -b
+```
 
 ![](../part1_uefi_exploration/img/1.png "output comandos map y ls")
 
@@ -43,7 +66,19 @@ Pregunta de Razonamiento 2: Observando las variables Boot#### y BootOrder, ¿có
 
 El orden de ejecución lo define la variable global BootOrder. Esta contiene una lista de los números de las variables Boot####
 
+Cada entrada `Boot####` representa una opción concreta de arranque y contiene metadatos como la descripción visible, el dispositivo asociado y la ruta del cargador EFI. El Boot Manager recorre la lista definida en `BootOrder` de izquierda a derecha e intenta ejecutar cada entrada en ese orden; si una opción falla o no está disponible, continúa con la siguiente. De esta manera, `BootOrder` funciona como la política de prioridad y `Boot####` como el conjunto de destinos posibles.
+
 ## Footprinting de Memoria y Hardware
+
+En esta etapa se relevaron tres aspectos distintos del entorno de prearranque. Con `memmap -b` se observaron las regiones de memoria clasificadas por tipo de servicio o uso; con `pci -b` se listaron dispositivos conectados al bus PCI; y con `drivers -b` se identificaron los controladores que el firmware ya había cargado.
+
+```plaintext
+Shell> memmap -b
+Shell> pci -b
+Shell> drivers -b
+```
+
+Este relevamiento es valioso desde el punto de vista de seguridad porque permite determinar qué superficies quedan disponibles antes del arranque del sistema operativo y qué componentes del firmware continúan teniendo influencia sobre la ejecución posterior.
 
 ![](../part1_uefi_exploration/img/6.png "output comando memmap -b parte 1")
 
@@ -63,15 +98,70 @@ Si el malware se logra alojar en esas regiones puede interceptar llamadas del si
 
 ## Desarrollo de la Aplicación
 
+La aplicación desarrollada tiene un objetivo deliberadamente mínimo: validar la ejecución de código nativo dentro del entorno UEFI y dejar una evidencia clara tanto en la salida de consola como en el análisis estático posterior. Para ello se inicializa la biblioteca de GNU-EFI, se imprime un mensaje inicial y luego se define un byte con valor `0xCC`, opcode que corresponde a la instrucción `INT3`, ampliamente utilizada como breakpoint de software.
+
+```c
+#include <efi.h>
+#include <efilib.h>
+
+EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
+    InitializeLib(ImageHandle, SystemTable);
+    SystemTable->ConOut->OutputString(SystemTable->ConOut, L"Iniciando analisis de seguridad...\r\n");
+
+    // Inyección de un software breakpoint (INT3)
+    unsigned char code[] = { 0xCC };
+
+    if (code[0] == 0xCC) {
+        SystemTable->ConOut->OutputString(SystemTable->ConOut, L"Breakpoint estatico alcanzado.\r\n");
+    }
+
+    return EFI_SUCCESS;
+}
+```
+
+El uso de una condición sobre `0xCC` permite que el valor sea visible al descompilar el binario, facilitando la correlación entre el código fuente, el ensamblado y el pseudocódigo generado por la herramienta de análisis.
+
 Pregunta de Razonamiento 4: ¿Por qué utilizamos SystemTable->ConOut->OutputString en lugar de la función printf de C?
 
 Se utiliza por que en ese momento nos encontramos en el entorno de UEFI donde no se han cargado las librerias estandar de C y por lo tanto debemos usar protocolos de salida de la SystemTable de UEFI.
 
 ## Compilación a Formato PE/COFF
 
+La compilación se realizó en tres etapas. Primero se generó un objeto relocatable a partir del código fuente con opciones compatibles con un entorno freestanding. Luego se enlazó dicho objeto con las bibliotecas de GNU-EFI para producir un binario intermedio. Finalmente, `objcopy` convirtió el resultado al formato `EFI application`, que internamente corresponde a `PE/COFF`, formato esperado por el firmware UEFI.
+
+```bash
+# 1. Compilar a código objeto
+gcc -I/usr/include/efi -I/usr/include/efi/x86_64 -I/usr/include/efi/protocol \
+    -fpic -ffreestanding -fno-stack-protector -fno-strict-aliasing \
+    -fshort-wchar -mno-red-zone -maccumulate-outgoing-args -Wall \
+    -c -o aplicacion.o aplicacion.c
+
+# 2. Linkear a un binario intermedio
+ld -shared -Bsymbolic -L/usr/lib -L/usr/lib/efi \
+   -T /usr/lib/elf_x86_64_efi.lds /usr/lib/crt0-efi-x86_64.o \
+   aplicacion.o -o aplicacion.so -lefi -lgnuefi
+
+# 3. Convertir al ejecutable EFI final
+objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym \
+        -j .rel -j .rela -j .rel.* -j .rela.* -j .reloc \
+        --target=efi-app-x86_64 aplicacion.so aplicacion.efi
+```
+
+Esta secuencia muestra una diferencia importante respecto de una aplicación de espacio de usuario tradicional: aunque el desarrollo se realiza desde Linux, el artefacto final no es un ELF ejecutable para el sistema operativo anfitrión, sino un binario `PE32+` preparado para ser cargado directamente por el firmware.
+
 ## Análisis de Metadatos y Decompilación
 
 ![](../part2_development_compilation_security_analysis/img/1.png "verificacion del tipo de archivo de aplicacion.efi")
+
+La inspección del archivo resultante confirma que `aplicacion.efi` fue generado como `PE32+ executable (EFI application) x86-64`, lo cual es consistente con la especificación de UEFI. Esto valida que la conversión final fue correcta y que el binario ya no debe interpretarse como un ejecutable ELF convencional.
+
+En consecuencia, herramientas orientadas exclusivamente a ELF no resultan adecuadas para extraer todos sus metadatos. El dato relevante para esta práctica es que el firmware espera un ejecutable PE/COFF y que la herramienta `file` lo reconoce explícitamente como una aplicación EFI.
+
+![](../part2_development_compilation_security_analysis/img/2.png "pseudocodigo de efi_main en Ghidra")
+
+![](../part2_development_compilation_security_analysis/img/3.png "desensamblado asociado a la comparacion con 0xCC")
+
+En Ghidra se observa que la función `efi_main` conserva la estructura esencial del programa: inicialización de la biblioteca, llamada al método `OutputString` de `ConOut` e inspección del byte almacenado localmente antes de imprimir el segundo mensaje. El desensamblado también permite ubicar la comparación contra `0xCC`, lo que conecta el comportamiento esperado en tiempo de ejecución con su representación a bajo nivel.
 
 Pregunta de Razonamiento 5: En el pseudocódigo de Ghidra, la condición 0xCC suele aparecer como -52. ¿A qué se debe este fenómeno y por qué importa en ciberseguridad?
 
