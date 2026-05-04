@@ -284,3 +284,90 @@ El desarrollo de este trabajo práctico permitió recorrer de forma progresiva l
 En la primera parte, el análisis de handles, protocolos, variables de NVRAM y mapas de memoria permitió comprender cómo el firmware organiza los recursos del sistema y cómo define la secuencia de arranque a través de políticas persistentes. En la segunda parte, la construcción de una aplicación en C y su transformación al formato `PE/COFF` mostró las particularidades del desarrollo de software UEFI, donde no existe una infraestructura equivalente a la de un proceso en espacio de usuario y toda interacción debe canalizarse mediante servicios del propio firmware. Finalmente, la tercera parte permitió trasladar ese conocimiento al hardware físico y evidenciar que la ejecución bare metal introduce restricciones y comportamientos adicionales, tales como la necesidad de deshabilitar `Secure Boot` y las diferencias prácticas entre un entorno emulado y la implementación concreta del firmware de un fabricante.
 
 El resultado general de la experiencia no solo aporta una comprensión más precisa del flujo de arranque y del formato de los binarios EFI, sino también una visión relevante desde la seguridad ofensiva y defensiva. El estudio de regiones persistentes de memoria, variables globales y mecanismos como `Secure Boot` muestra con claridad por qué UEFI constituye un punto crítico dentro de la cadena de confianza del sistema. En consecuencia, este trabajo no solo cumple un objetivo de familiarización técnica, sino que también sienta una base sólida para analizar riesgos, capacidades de persistencia y mecanismos de protección en plataformas modernas.
+
+# Conclusion - Respuestas solicitadas
+
+**¿Cuál es la ventaja de seguridad y compatibilidad del modelo de handles y protocolos de UEFI frente al antiguo BIOS?**
+
+La principal ventaja es que este modelo desacopla al software de prearranque de
+los detalles concretos del hardware. En lugar de acceder directamente a puertos
+o registros específicos, las aplicaciones interactúan con protocolos expuestos
+por el firmware, lo que mejora la compatibilidad entre plataformas y reduce la
+dependencia de una arquitectura particular.
+
+Desde el punto de vista de seguridad, esto también reduce la superficie de
+ataque. Al obligar a que el acceso al hardware pase por interfaces controladas
+por el firmware, se limita la posibilidad de que código malicioso manipule
+periféricos de forma directa o no autorizada. A su vez, el mismo binario puede
+ser reutilizado sobre distintos equipos siempre que el firmware implemente los
+protocolos definidos por la especificación UEFI.
+
+**¿Cómo determina el Boot Manager la secuencia de arranque a partir de Boot#### y BootOrder?**
+
+La secuencia de arranque es determinada por la variable global `BootOrder`,
+que contiene una lista ordenada de identificadores `Boot####`. Cada entrada
+`Boot####` describe una opción concreta de arranque, incluyendo atributos,
+descripción visible, dispositivo asociado y la ruta al ejecutable EFI que debe
+cargarse.
+
+El Boot Manager recorre esa lista en el orden definido por `BootOrder` e
+intenta ejecutar cada opción sucesivamente. Si una entrada falla o no está
+disponible, continúa con la siguiente. De esta forma, `BootOrder` define la
+política de prioridad, mientras que `Boot####` representa el conjunto de
+destinos de arranque posibles.
+
+**¿Por qué las regiones RuntimeServicesCode son un objetivo principal para malware tipo Bootkit?**
+
+Estas regiones son especialmente sensibles porque permanecen activas en memoria
+incluso después de que el sistema operativo haya terminado de arrancar. A
+diferencia de `BootServicesCode`, que deja de ser válida tras la transición al
+sistema operativo, `RuntimeServicesCode` sigue siendo utilizada para servicios
+como acceso a variables EFI, consulta de tiempo o reinicios controlados.
+
+Si un atacante consigue introducir código malicioso en esas zonas, puede
+interceptar llamadas entre el sistema operativo y el firmware con un nivel muy
+alto de persistencia y privilegio. Esto convierte a esas regiones en un punto
+de interés crítico para bootkits y otras amenazas que buscan mantenerse ocultas
+por debajo del sistema operativo.
+
+**¿Por qué se utiliza SystemTable->ConOut->OutputString en lugar de printf en una aplicación UEFI?**
+
+Se utiliza `SystemTable->ConOut->OutputString` porque, en el entorno UEFI,
+todavía no existe una biblioteca estándar de C equivalente a la disponible en
+un proceso convencional de sistema operativo. La aplicación se ejecuta en un
+contexto freestanding y debe interactuar con la salida mediante los servicios
+que provee directamente el firmware.
+
+En particular, `ConOut` implementa el protocolo de salida de texto simple de
+UEFI, y `OutputString` permite imprimir cadenas en formato `CHAR16`. Esto deja
+en claro que una aplicación UEFI no puede asumir la existencia de `printf`,
+POSIX ni un runtime completo de usuario, sino que debe trabajar con las
+abstracciones propias del firmware.
+
+**¿Por qué Ghidra muestra 0xCC como -52 y por qué importa en ciberseguridad?**
+
+Esto sucede porque el valor `0xCC` puede ser interpretado como un entero con
+signo de 8 bits. En ese dominio, `0xCC` equivale a `204` sin signo, pero a
+`-52` cuando se interpreta en complemento a dos. Por eso el descompilador puede
+mostrar esa constante con signo aunque en el código fuente se haya pensado como
+un byte hexadecimal.
+
+La cuestión es importante en ciberseguridad porque `0xCC` corresponde a la
+instrucción `INT3`, utilizada como breakpoint de software en arquitecturas
+x86/x64. Reconocer correctamente ese valor al analizar binarios permite
+identificar marcadores de depuración, trazas de explotación o secuencias
+relevantes para la inspección del flujo de ejecución.
+
+**¿Por qué fue necesario deshabilitar Secure Boot para ejecutar la shell UEFI y la aplicación del trabajo práctico?**
+
+Fue necesario deshabilitar `Secure Boot` porque este mecanismo solo permite la
+ejecución de binarios EFI cuya firma sea válida frente a una base de confianza
+almacenada en el firmware. Tanto la shell UEFI utilizada como `aplicacion.efi`
+fueron artefactos de laboratorio y no contaban con una firma reconocida por el
+fabricante del equipo.
+
+Si `Secure Boot` hubiera permanecido activo, el firmware habría rechazado la
+carga de esos binarios con un error de violación de seguridad. Esto muestra con
+claridad que `Secure Boot` protege la cadena de arranque verificando la
+integridad y autenticidad criptográfica de las imágenes PE/COFF, aunque al
+mismo tiempo limita la ejecución de binarios experimentales no firmados.

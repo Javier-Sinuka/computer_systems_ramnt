@@ -416,3 +416,86 @@ relación entre hardware, firmware y software de bajo nivel, y para mostrar que
 conceptos como sector de arranque, segmentación, GDT y cambio de modo no son
 solo teóricos, sino elementos concretos que pueden observarse y validarse
 mediante herramientas reales.
+
+# Conclusion - Respuestas solicitadas
+
+**¿Qué es UEFI? ¿como puedo usarlo? Mencionar además una función a la que podría llamar usando esa dinámica.**
+
+UEFI es una interfaz de firmware moderna que reemplaza al BIOS tradicional y
+provee un entorno de ejecución previo al sistema operativo. Su función es
+inicializar el hardware, exponer servicios básicos y luego transferir el
+control a un cargador de arranque o a una aplicación EFI. A diferencia del
+modelo clásico del BIOS, UEFI trabaja con una arquitectura más modular,
+servicios bien definidos y tablas de punteros que permiten interactuar con el
+firmware de forma estructurada.
+
+Puede usarse de dos maneras principales. Desde el punto de vista del usuario,
+se usa cada vez que el equipo arranca un sistema operativo en modo UEFI.
+Desde el punto de vista del desarrollo, puede utilizarse escribiendo una
+aplicación EFI en C u otro lenguaje compatible, compilándola al formato
+`PE/COFF` y ejecutándola directamente desde el firmware antes de que cargue el
+sistema operativo.
+
+Esa interacción se realiza a través de las tablas y protocolos que el firmware
+expone. Por ejemplo, una aplicación EFI puede acceder a consola, sistema de
+archivos, variables persistentes o servicios de memoria. Una función concreta
+que puede invocarse con esta dinámica es `OutputString`, perteneciente al
+protocolo de salida de texto simple (`Simple Text Output Protocol`), utilizada
+para imprimir mensajes en pantalla durante la etapa de arranque.
+
+**¿Menciona casos de bugs de UEFI que puedan ser explotados?**
+
+Sí. Existen antecedentes importantes de vulnerabilidades explotables en
+implementaciones UEFI y en componentes de la cadena de arranque moderna. Un
+caso conocido es **LogoFAIL**, publicado en 2023, donde se encontraron fallas
+en analizadores de imágenes embebidos en distintos firmwares UEFI. A través de
+imágenes manipuladas especialmente, un atacante podía alcanzar ejecución de
+código durante el arranque incluso antes del sistema operativo.
+
+Otro caso relevante es **BootHole**, divulgado en 2020, relacionado con GRUB2
+en contextos de arranque seguro. Bajo ciertas condiciones, permitía ejecutar
+código no confiable durante el proceso de boot y comprometer la cadena de
+confianza. Estos ejemplos muestran que las fallas en firmware o en los
+componentes cercanos al arranque son especialmente críticas porque operan con
+gran privilegio y afectan etapas previas a la carga del sistema operativo.
+
+**¿Qué es Converged Security and Management Engine (CSME), the Intel Management Engine BIOS Extension (Intel MEBx).?**
+
+**Converged Security and Management Engine (CSME)** es un subsistema presente
+en muchas plataformas Intel modernas. Opera sobre un microcontrolador separado
+del procesador principal y sigue activo incluso cuando el sistema operativo
+todavía no arrancó o cuando la máquina se encuentra en ciertos estados de bajo
+consumo. Su rol incluye tareas de seguridad, gestión remota, arranque
+confiable, inicialización de la plataforma y otros servicios auxiliares
+relacionados con el firmware.
+
+Dentro de ese ecosistema se encuentra **Intel Management Engine BIOS Extension
+(Intel MEBx)**, que es la interfaz de configuración accesible desde el propio
+firmware. Mediante MEBx pueden ajustarse parámetros del motor de gestión de
+Intel, especialmente en entornos empresariales donde se aprovechan funciones
+de administración remota, aprovisionamiento y políticas de seguridad. En otras
+palabras, CSME es el subsistema de fondo que ejecuta esas capacidades, mientras
+que MEBx es una interfaz de configuración para administrarlas desde el firmware.
+
+**¿Qué es coreboot ? ¿Qué productos lo incorporan ?¿Cuales son las ventajas de su utilización?**
+
+**Coreboot** es un proyecto de firmware libre diseñado para reemplazar BIOS o
+firmware propietario por una etapa de inicialización mínima, rápida y
+auditable. Su filosofía consiste en realizar únicamente la configuración
+esencial del hardware y luego transferir el control a una carga útil
+(`payload`), como por ejemplo SeaBIOS, GRUB, LinuxBoot o incluso un kernel
+Linux.
+
+Se encuentra en distintos tipos de productos. Un caso muy conocido es el de
+varios **Chromebooks**, donde Google lo utilizó en numerosos equipos. También
+aparece en algunas configuraciones de fabricantes orientados a software libre y
+seguridad, como **System76** y **Purism**, además de plataformas embebidas,
+equipos de laboratorio y hardware personalizado.
+
+Sus ventajas principales son:
+
+- reduce el tiempo de arranque al minimizar la lógica ejecutada en firmware
+- permite una mayor auditabilidad del código respecto de soluciones cerradas
+- brinda flexibilidad para elegir la carga útil más adecuada según el objetivo del sistema
+- facilita tareas de investigación, depuración y personalización del proceso de arranque
+- puede mejorar la seguridad al hacer más visible el comportamiento del firmware y reducir componentes innecesarios
