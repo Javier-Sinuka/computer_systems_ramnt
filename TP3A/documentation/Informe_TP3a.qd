@@ -16,11 +16,9 @@
 
 # Introducción
 
-El presente informe documenta el desarrollo de las partes 1 y 2 del trabajo práctico propuesto en el archivo `Arquitectura .pdf`, centradas en la exploración del entorno UEFI, la interacción con su shell, el análisis de variables y mapas de memoria, y la construcción de una aplicación nativa en dicho entorno.
+El presente informe documenta el desarrollo de las tres partes del trabajo práctico propuesto en el archivo `Arquitectura .pdf`, centradas en la exploración del entorno UEFI, la interacción con su shell, el análisis de variables y mapas de memoria, la construcción de una aplicación nativa y su posterior ejecución tanto en entorno virtual como en hardware físico.
 
-En la primera parte se analiza cómo UEFI abstrae el hardware mediante handles y protocolos, cómo administra el arranque a través de variables persistentes en NVRAM y qué información expone sobre memoria, buses y controladores antes de cargar un sistema operativo. En la segunda parte se desarrolla una aplicación sencilla en C para ejecutarse como binario UEFI, se compila al formato PE/COFF requerido por el firmware y se inspecciona su comportamiento con herramientas de análisis estático.
-
-La parte 3 del enunciado, correspondiente a la ejecución en hardware físico, no forma parte del presente informe.
+En la primera parte se analiza cómo UEFI abstrae el hardware mediante handles y protocolos, cómo administra el arranque a través de variables persistentes en NVRAM y qué información expone sobre memoria, buses y controladores antes de cargar un sistema operativo. En la segunda parte se desarrolla una aplicación sencilla en C para ejecutarse como binario UEFI, se compila al formato PE/COFF requerido por el firmware y se inspecciona su comportamiento con herramientas de análisis estático. Finalmente, en la tercera parte se traslada el binario generado a un entorno bare metal, sorteando las restricciones de arranque seguro para validar su ejecución directa desde firmware.
 
 Desde un punto de vista arquitectónico, UEFI reemplaza el modelo monolítico y fuertemente acoplado del BIOS por una interfaz estandarizada basada en servicios, estructuras de datos globales y protocolos publicados por el firmware. Esto permite que aplicaciones pre-boot, cargadores y utilidades de diagnóstico interactúen con consola, almacenamiento, variables persistentes y memoria de manera uniforme, independientemente del fabricante de la placa base o del dispositivo subyacente.
 
@@ -203,3 +201,86 @@ Es importante en ciberseguridad dado que representa la INT 3, que es la instrucc
 Ej.: En los exploits por buffer overflow 0xCC se usa a menudo como un marcador para rastrear el flujo de ejecución o asegurar que el código llegue al lugar correcto.
 
 Más formalmente, el valor `0xCC` puede ser mostrado por un descompilador como entero con signo de 8 bits, cuyo rango es `-128` a `127`. En ese dominio, `0xCC` equivale a `204` sin signo, pero a `-52` con signo. Comprender esta diferencia es relevante al auditar binarios, ya que una lectura incorrecta del tipo de dato puede hacer que un analista pase por alto constantes significativas, marcadores de depuración o secuencias de instrucciones con valor semántico en una investigación de seguridad.
+
+# Trabajo Práctico 3: Ejecución en Hardware Físico (Bare Metal)
+
+## Preparación del medio de arranque (USB)
+
+En esta etapa el objetivo es trasladar al hardware físico el binario generado en la parte 2, respetando los requisitos de arranque de la especificación UEFI. Para ello se utiliza un pendrive formateado en `FAT32`, ya que este sistema de archivos es el contemplado por la especificación para la partición del sistema EFI y permite que el firmware localice de forma estándar ejecutables `.efi`.
+
+La estrategia consiste en preparar el dispositivo USB con dos elementos principales: una shell UEFI en la ruta por defecto `EFI/BOOT/BOOTX64.EFI`, que será utilizada como primer punto de entrada, y la aplicación `aplicacion.efi` copiada a la raíz del dispositivo para su ejecución manual desde dicha shell. Este enfoque evita depender de un sistema operativo instalado en el equipo y permite validar el comportamiento del binario directamente en el contexto del firmware real.
+
+```bash
+# 1. Identificar el dispositivo USB
+lsblk
+
+# 2. Formatear en FAT32
+sudo mkfs.vfat -F 32 /dev/sdb1
+
+# 3. Montar el pendrive
+sudo mount /dev/sdb1 /mnt
+
+# 4. Crear la estructura de arranque UEFI estándar
+sudo mkdir -p /mnt/EFI/BOOT
+
+# 5. Descargar la shell UEFI oficial de TianoCore
+sudo wget https://github.com/tianocore/edk2/raw/UDK2018/ShellBinPkg/UefiShell/X64/Shell.efi \
+    -O /mnt/EFI/BOOT/BOOTX64.EFI
+
+# 6. Copiar la aplicación compilada en el TP2
+sudo cp ../part2_development_compilation_security_analysis/uefi_security_lab/build/aplicacion.efi /mnt/
+
+# 7. Sincronizar y desmontar
+sudo sync
+sudo umount /mnt
+```
+
+La ubicación `EFI/BOOT/BOOTX64.EFI` no es arbitraria: corresponde a la ruta de fallback definida por UEFI para medios removibles de 64 bits. Si el firmware no encuentra una entrada de arranque previamente registrada en NVRAM para ese medio, puede igualmente localizar esa ruta predeterminada e iniciar la shell allí ubicada.
+
+## Configuración del BIOS/UEFI
+
+Una vez preparado el dispositivo, fue necesario ajustar la configuración del firmware de la computadora física para permitir la ejecución del entorno de prueba. En particular, se deshabilitó `Secure Boot`, ya que tanto la shell descargada como la aplicación generada durante el trabajo práctico no están firmadas por una autoridad reconocida por el firmware del fabricante.
+
+Desde el punto de vista de seguridad, `Secure Boot` actúa como un mecanismo de validación criptográfica de la cadena de arranque: solo permite cargar binarios EFI cuya firma pueda verificarse contra claves confiables almacenadas en firmware. Esto protege contra bootkits y cargadores maliciosos, pero también bloquea cualquier binario experimental o académico que no haya sido firmado adecuadamente. Por eso, para esta práctica, fue necesario desactivar temporalmente dicha protección.
+
+## Ejecución en Bare Metal
+
+Con el pendrive preparado y la configuración del firmware ajustada, la ejecución en bare metal consiste en arrancar el equipo desde el medio removible, ingresar a la shell UEFI y lanzar manualmente la aplicación compilada. A diferencia del entorno emulado, aquí el binario se ejecuta sobre el firmware y el hardware reales del equipo, lo que permite verificar compatibilidad práctica con la implementación UEFI del fabricante.
+
+
+```plaintext
+Shell> FS0:
+FS0:\> ls
+FS0:\> aplicacion.efi
+```
+
+Una vez ralizada la ejecucion de los comandos propuestos, obtuvimos el siguiente comportamiento (observado en la siguiente captura):
+
+
+
+Si la ejecución es correcta, el firmware debe transferir el control al punto de entrada `efi_main` de la imagen cargada y la salida debe imprimirse a través del protocolo de consola del sistema, sin intervención de un kernel ni de un sistema operativo anfitrión. Esto demuestra que el binario construido en la parte 2 no solo posee el formato correcto, sino que también es funcional en un entorno UEFI real.
+
+![](../part3_execution_on_physical_hardware/img/UEFI_Shell_Not_Working.jpeg "Salida de la shell UEFI al ejecutar aplicacion.efi")
+
+Texto esperado en pantalla:
+
+```plaintext
+Iniciando analisis de seguridad...
+Breakpoint estatico alcanzado.
+```
+
+La realidad es que al ejecutar `aplicacion.efi` en el hardware físico, la shell UEFI no mostró la salida esperada y se mantuvo sin respuesta. Esto sugiere que, aunque el binario fue reconocido y ejecutado, no logró interactuar correctamente con los servicios de salida del firmware o que hubo un error en la ejecución que impidió que el mensaje se imprimiera.
+
+**Pregunta:** *¿Por qué fue necesario deshabilitar Secure Boot para ejecutar la shell UEFI y la aplicación desarrollada en la práctica?*
+
+Fue necesario deshabilitar `Secure Boot` porque este mecanismo solo permite ejecutar binarios EFI firmados por entidades cuyas claves estén registradas como confiables en el firmware. Tanto la shell UEFI utilizada como `aplicacion.efi` son artefactos de laboratorio y no cuentan con una firma reconocida por el fabricante del equipo, por lo que el firmware los rechazaría con un error de violación de seguridad si esa protección permaneciera activa.
+
+Desde una perspectiva técnica, esto confirma que `Secure Boot` no evalúa si el binario "parece legítimo" por su nombre o ubicación, sino si la imagen PE/COFF contiene una firma válida encadenable a una base de confianza instalada en la plataforma. En consecuencia, la práctica también evidencia la tensión entre flexibilidad de experimentación y garantías de integridad en la cadena de arranque.
+
+# Conclusión
+
+El desarrollo de este trabajo práctico permitió recorrer de forma progresiva las principales capas del entorno UEFI, desde la exploración inicial de sus abstracciones de hardware hasta la compilación y ejecución de una aplicación nativa fuera de un sistema operativo convencional. A lo largo de la práctica se observó que UEFI no debe entenderse únicamente como un reemplazo moderno del BIOS, sino como una plataforma de firmware con servicios, protocolos y estructuras propias, capaces de ofrecer un entorno de ejecución relativamente estandarizado en la etapa de prearranque.
+
+En la primera parte, el análisis de handles, protocolos, variables de NVRAM y mapas de memoria permitió comprender cómo el firmware organiza los recursos del sistema y cómo define la secuencia de arranque a través de políticas persistentes. En la segunda parte, la construcción de una aplicación en C y su transformación al formato `PE/COFF` mostró las particularidades del desarrollo de software UEFI, donde no existe una infraestructura equivalente a la de un proceso en espacio de usuario y toda interacción debe canalizarse mediante servicios del propio firmware. Finalmente, la tercera parte permitió trasladar ese conocimiento al hardware físico y evidenciar que la ejecución bare metal introduce restricciones y comportamientos adicionales, tales como la necesidad de deshabilitar `Secure Boot` y las diferencias prácticas entre un entorno emulado y la implementación concreta del firmware de un fabricante.
+
+El resultado general de la experiencia no solo aporta una comprensión más precisa del flujo de arranque y del formato de los binarios EFI, sino también una visión relevante desde la seguridad ofensiva y defensiva. El estudio de regiones persistentes de memoria, variables globales y mecanismos como `Secure Boot` muestra con claridad por qué UEFI constituye un punto crítico dentro de la cadena de confianza del sistema. En consecuencia, este trabajo no solo cumple un objetivo de familiarización técnica, sino que también sienta una base sólida para analizar riesgos, capacidades de persistencia y mecanismos de protección en plataformas modernas.
