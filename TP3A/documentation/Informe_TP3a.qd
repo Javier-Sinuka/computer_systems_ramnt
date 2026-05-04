@@ -16,22 +16,55 @@
 
 # Introducción
 
+El presente informe documenta el desarrollo de las tres partes del trabajo práctico propuesto en el archivo `Arquitectura .pdf`, centradas en la exploración del entorno UEFI, la interacción con su shell, el análisis de variables y mapas de memoria, la construcción de una aplicación nativa y su posterior ejecución tanto en entorno virtual como en hardware físico.
+
+En la primera parte se analiza cómo UEFI abstrae el hardware mediante handles y protocolos, cómo administra el arranque a través de variables persistentes en NVRAM y qué información expone sobre memoria, buses y controladores antes de cargar un sistema operativo. En la segunda parte se desarrolla una aplicación sencilla en C para ejecutarse como binario UEFI, se compila al formato PE/COFF requerido por el firmware y se inspecciona su comportamiento con herramientas de análisis estático. Finalmente, en la tercera parte se traslada el binario generado a un entorno bare metal, sorteando las restricciones de arranque seguro para validar su ejecución directa desde firmware.
+
+Desde un punto de vista arquitectónico, UEFI reemplaza el modelo monolítico y fuertemente acoplado del BIOS por una interfaz estandarizada basada en servicios, estructuras de datos globales y protocolos publicados por el firmware. Esto permite que aplicaciones pre-boot, cargadores y utilidades de diagnóstico interactúen con consola, almacenamiento, variables persistentes y memoria de manera uniforme, independientemente del fabricante de la placa base o del dispositivo subyacente.
+
 # Trabajo Práctico 1: Exploración del entorno UEFI y la Shell
 
 ## Arranque en el entorno virtual
 
+Para iniciar el laboratorio se utilizó `QEMU` junto con `OVMF`, que provee una implementación abierta del firmware UEFI. A diferencia de un arranque legado basado en BIOS, este entorno presenta una shell interactiva, servicios de arranque, servicios de tiempo de ejecución y una base de datos de protocolos que permiten inspeccionar el sistema antes de la carga del sistema operativo.
+
+El arranque en un entorno virtual resulta útil porque permite repetir pruebas de forma controlada, observar el comportamiento del firmware sin depender de una máquina física y validar el flujo de trabajo de exploración y desarrollo en condiciones reproducibles.
+
+En términos de ejecución, OVMF implementa las fases esperadas del firmware UEFI, incluyendo la inicialización de plataforma y la transición hacia la selección del dispositivo de arranque. La shell UEFI se ejecuta todavía dentro del contexto del firmware, por lo que los comandos disponibles interactúan directamente con las estructuras internas del boot environment y no con servicios de un sistema operativo generalista.
+
+```bash
+qemu-system-x86_64 -m 512 -bios /usr/share/ovmf/OVMF.fd -net none
+```
+
 ## Exploración de Dispositivos (Handles y Protocolos)
+
+La exploración inicial se realizó con los comandos `map`, `ls` y `dh -b`. El primero enumera los sistemas de archivos y dispositivos que el firmware expone a la shell, mientras que `dh -b` permite inspeccionar los handles y los protocolos asociados a cada uno. Esto evidencia que UEFI trabaja sobre abstracciones de software en lugar de depender de direcciones o puertos de hardware fijos.
+
+Un `handle` en UEFI puede entenderse como un contenedor opaco administrado por el firmware al que se le asocian uno o más protocolos. Cada protocolo define un contrato funcional, por ejemplo acceso a bloques, sistema de archivos simple, salida gráfica o consola de texto. En consecuencia, una aplicación no necesita conocer detalles eléctricos o registros específicos del dispositivo: le basta con localizar el protocolo adecuado y operar a través de su interfaz publicada.
+
+```plaintext
+Shell> map
+Shell> FS0:
+FS0:\> ls
+Shell> dh -b
+```
 
 ![](../part1_uefi_exploration/img/1.png "output comandos map y ls")
 
 ![](../part1_uefi_exploration/img/2.png "output comando dh -b")
 
-Pregunta de Razonamiento 1: Al ejecutar el comando map y dh, vemos protocolos e identificadores en lugar de puertos de hardware fijos. ¿Cuál es la ventaja de seguridad y compatibilidad de este modelo frente al antiguo BIOS?
+**Pregunta:** *Al ejecutar el comando map y dh, vemos protocolos e identificadores en lugar de puertos de hardware fijos. ¿Cuál es la ventaja de seguridad y compatibilidad de este modelo frente al antiguo BIOS?*
 
 La ventaja es que esto permite que el firmware sea independiente de la arquitectura del hardware. Al no permitir que las aplicaciones accedan directamente al hardware y forzarlas a usar interfaces (protocolos) controladas por
 el firmware, se reduce la superficie de ataque para código malicioso que intente manipular periféricos de forma directa o no autorizada.
 
+Además, este modelo favorece la portabilidad del software de prearranque. Un mismo binario puede ejecutarse sobre distintas plataformas siempre que el firmware implemente los protocolos exigidos por la especificación. Esto desacopla la lógica de alto nivel de los detalles concretos del chipset, del controlador SATA/NVMe o del adaptador de video, algo que en BIOS tradicional solía resolverse con supuestos rígidos y llamadas específicas de plataforma.
+
 ## Análisis de Variables Globales (NVRAM)
+
+La inspección de variables persistentes permite observar cómo UEFI mantiene estado entre reinicios. A diferencia de variables de entorno efímeras, las variables de NVRAM son almacenadas por el firmware con atributos explícitos, como acceso durante servicios de arranque, acceso en tiempo de ejecución o persistencia no volátil. Esto las convierte en un mecanismo central tanto para la configuración del sistema como para la cadena de arranque.
+
+Dentro de este conjunto, `BootOrder` y `Boot####` pertenecen normalmente al espacio de variables globales de EFI y participan en la fase `BDS` (`Boot Device Selection`). En esa fase, el firmware ya inicializó suficientes servicios como para poder enumerar dispositivos, consultar variables persistentes y decidir qué cargador EFI intentar ejecutar.
 
 ![](../part1_uefi_exploration/img/3.png "output comando dmpstore -b parte 1")
 
@@ -39,21 +72,39 @@ el firmware, se reduce la superficie de ataque para código malicioso que intent
 
 ![](../part1_uefi_exploration/img/5.png "output comando dmpstore set -v")
 
-Pregunta de Razonamiento 2: Observando las variables Boot#### y BootOrder, ¿cómo determina el Boot Manager la secuencia de arranque?
+**Pregunta:** *Observando las variables Boot#### y BootOrder, ¿cómo determina el Boot Manager la secuencia de arranque?*
 
 El orden de ejecución lo define la variable global BootOrder. Esta contiene una lista de los números de las variables Boot####
 
+Cada entrada `Boot####` representa una opción concreta de arranque y contiene metadatos como la descripción visible, el dispositivo asociado y la ruta del cargador EFI. El Boot Manager recorre la lista definida en `BootOrder` de izquierda a derecha e intenta ejecutar cada entrada en ese orden; si una opción falla o no está disponible, continúa con la siguiente. De esta manera, `BootOrder` funciona como la política de prioridad y `Boot####` como el conjunto de destinos posibles.
+
+Técnicamente, cada entrada `Boot####` codifica una estructura con atributos, una cadena descriptiva y un `device path`, es decir, una representación estructurada del camino hacia el recurso de arranque. Ese `device path` puede apuntar a un disco, una partición del sistema EFI y un archivo `.efi` concreto. Por eso el firmware no solo decide "qué dispositivo" probar, sino también "qué ejecutable EFI" invocar dentro de ese dispositivo.
+
 ## Footprinting de Memoria y Hardware
+
+En esta etapa se relevaron tres aspectos distintos del entorno de prearranque. Con `memmap -b` se observaron las regiones de memoria clasificadas por tipo de servicio o uso; con `pci -b` se listaron dispositivos conectados al bus PCI; y con `drivers -b` se identificaron los controladores que el firmware ya había cargado.
+
+```plaintext
+Shell> memmap -b
+Shell> pci -b
+Shell> drivers -b
+```
+
+Este relevamiento es valioso desde el punto de vista de seguridad porque permite determinar qué superficies quedan disponibles antes del arranque del sistema operativo y qué componentes del firmware continúan teniendo influencia sobre la ejecución posterior.
+
+El comando `memmap` es especialmente útil porque expone la clasificación que el propio firmware realiza sobre la RAM. Regiones como `LoaderCode`, `BootServicesCode`, `BootServicesData`, `RuntimeServicesCode` y `RuntimeServicesData` no son simplemente etiquetas descriptivas: determinan cómo puede reutilizarse esa memoria y qué porciones deben preservarse cuando el sistema operativo invoque `ExitBootServices` para abandonar el entorno de arranque.
 
 ![](../part1_uefi_exploration/img/6.png "output comando memmap -b parte 1")
 
 ![](../part1_uefi_exploration/img/7.png "output comando memmap -b parte 2")
 
 
-Pregunta de Razonamiento 3: En el mapa de memoria (memmap), existen regiones marcadas como RuntimeServicesCode. ¿Por qué estas áreas son un objetivo principal para los desarrolladores de malware (Bootkits)?
+**Pregunta:** *En el mapa de memoria (memmap), existen regiones marcadas como RuntimeServicesCode. ¿Por qué estas áreas son un objetivo principal para los desarrolladores de malware (Bootkits)?*
 
-las áreas de RuntimeServices permanecen activas y residentes en la memoria RAM mientras la computadora está encendida.
+Las áreas de RuntimeServices permanecen activas y residentes en la memoria RAM mientras la computadora está encendida.
 Si el malware se logra alojar en esas regiones puede interceptar llamadas del sistema operativo al firmware incluso después de que el sistema operativo haya cargado. Esto le otorga un nivel de persistencia y control extremadamente alto, permitiéndole sobrevivir a reinstalaciones del sistema operativo o manipular variables de seguridad de bajo nivel de forma invisible.
+
+La diferencia crítica respecto de `BootServicesCode` es que esta última deja de ser válida una vez completada la transición al sistema operativo, mientras que `RuntimeServicesCode` sigue siendo necesaria para operaciones como lectura/escritura de variables EFI, consulta de tiempo o reinicios controlados. Por ello, cualquier modificación maliciosa en esa zona impacta directamente en la interfaz que el sistema operativo conserva con el firmware tras el arranque.
 
 ![](../part1_uefi_exploration/img/8.png "output comando pci -b")
 
@@ -63,19 +114,173 @@ Si el malware se logra alojar en esas regiones puede interceptar llamadas del si
 
 ## Desarrollo de la Aplicación
 
-Pregunta de Razonamiento 4: ¿Por qué utilizamos SystemTable->ConOut->OutputString en lugar de la función printf de C?
+La aplicación desarrollada tiene un objetivo deliberadamente mínimo: validar la ejecución de código nativo dentro del entorno UEFI y dejar una evidencia clara tanto en la salida de consola como en el análisis estático posterior. Para ello se inicializa la biblioteca de GNU-EFI, se imprime un mensaje inicial y luego se define un byte con valor `0xCC`, opcode que corresponde a la instrucción `INT3`, ampliamente utilizada como breakpoint de software.
+
+La función de entrada `efi_main` sigue la convención esperada para una aplicación UEFI: recibe un `EFI_HANDLE` que identifica la imagen cargada y un puntero a `EFI_SYSTEM_TABLE`, estructura central que da acceso a los servicios del firmware. Desde esa tabla se alcanzan, entre otros, los punteros a `Boot Services`, `Runtime Services` y a los protocolos básicos de entrada/salida de consola. La llamada a `InitializeLib` inicializa el soporte de GNU-EFI para simplificar el acceso a esas estructuras.
+
+```c
+#include <efi.h>
+#include <efilib.h>
+
+EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
+    InitializeLib(ImageHandle, SystemTable);
+    SystemTable->ConOut->OutputString(SystemTable->ConOut, L"Iniciando analisis de seguridad...\r\n");
+
+    // Inyección de un software breakpoint (INT3)
+    unsigned char code[] = { 0xCC };
+
+    if (code[0] == 0xCC) {
+        SystemTable->ConOut->OutputString(SystemTable->ConOut, L"Breakpoint estatico alcanzado.\r\n");
+    }
+
+    return EFI_SUCCESS;
+}
+```
+
+El uso de una condición sobre `0xCC` permite que el valor sea visible al descompilar el binario, facilitando la correlación entre el código fuente, el ensamblado y el pseudocódigo generado por la herramienta de análisis.
+
+Desde el punto de vista didáctico, este ejemplo también sirve para observar que el firmware ejecuta aplicaciones en un contexto mucho más cercano al hardware que una aplicación de usuario tradicional. No hay aislamiento provisto por un kernel, ni loader de espacio de usuario, ni libc completa por defecto; por ello cada interacción con pantalla, variables o memoria debe realizarse mediante primitivas expuestas por la propia especificación UEFI.
+
+**Pregunta:** *¿Por qué utilizamos SystemTable->ConOut->OutputString en lugar de la función printf de C?*
 
 Se utiliza por que en ese momento nos encontramos en el entorno de UEFI donde no se han cargado las librerias estandar de C y por lo tanto debemos usar protocolos de salida de la SystemTable de UEFI.
 
+En particular, `ConOut` implementa el protocolo de salida de texto simple del firmware. `OutputString` espera cadenas en formato ancho (`CHAR16`), de allí el uso del prefijo `L` en los literales. Esta diferencia de representación de cadenas y la ausencia de un entorno POSIX completo dejan en claro que una aplicación UEFI no puede asumir la infraestructura típica de un proceso de Linux o Windows en espacio de usuario.
+
 ## Compilación a Formato PE/COFF
+
+La compilación se realizó en tres etapas. Primero se generó un objeto relocatable a partir del código fuente con opciones compatibles con un entorno freestanding. Luego se enlazó dicho objeto con las bibliotecas de GNU-EFI para producir un binario intermedio. Finalmente, `objcopy` convirtió el resultado al formato `EFI application`, que internamente corresponde a `PE/COFF`, formato esperado por el firmware UEFI.
+
+Las flags empleadas en la compilación no son arbitrarias. `-ffreestanding` indica que el programa no debe compilarse asumiendo un entorno hospedado por un sistema operativo; `-fshort-wchar` ajusta el tamaño de `wchar_t` al formato usado por EFI; `-mno-red-zone` evita el uso de la red zone del ABI System V, ya que no es seguro asumir su disponibilidad en este contexto; y `-fno-stack-protector` elimina dependencias con mecanismos de protección de pila que requerirían soporte adicional en tiempo de ejecución.
+
+```bash
+# 1. Compilar a código objeto
+gcc -I/usr/include/efi -I/usr/include/efi/x86_64 -I/usr/include/efi/protocol \
+    -fpic -ffreestanding -fno-stack-protector -fno-strict-aliasing \
+    -fshort-wchar -mno-red-zone -maccumulate-outgoing-args -Wall \
+    -c -o aplicacion.o aplicacion.c
+
+# 2. Linkear a un binario intermedio
+ld -shared -Bsymbolic -L/usr/lib -L/usr/lib/efi \
+   -T /usr/lib/elf_x86_64_efi.lds /usr/lib/crt0-efi-x86_64.o \
+   aplicacion.o -o aplicacion.so -lefi -lgnuefi
+
+# 3. Convertir al ejecutable EFI final
+objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym \
+        -j .rel -j .rela -j .rel.* -j .rela.* -j .reloc \
+        --target=efi-app-x86_64 aplicacion.so aplicacion.efi
+```
+
+Esta secuencia muestra una diferencia importante respecto de una aplicación de espacio de usuario tradicional: aunque el desarrollo se realiza desde Linux, el artefacto final no es un ELF ejecutable para el sistema operativo anfitrión, sino un binario `PE32+` preparado para ser cargado directamente por el firmware.
+
+También es relevante notar que el uso de un `.so` intermedio no implica que se esté construyendo una biblioteca compartida para Linux en el sentido convencional. Ese artefacto funciona como paso técnico dentro del pipeline de GNU-EFI para ordenar secciones, resolver símbolos y preparar las relocalizaciones necesarias antes de la conversión final a imagen EFI.
 
 ## Análisis de Metadatos y Decompilación
 
 ![](../part2_development_compilation_security_analysis/img/1.png "verificacion del tipo de archivo de aplicacion.efi")
 
-Pregunta de Razonamiento 5: En el pseudocódigo de Ghidra, la condición 0xCC suele aparecer como -52. ¿A qué se debe este fenómeno y por qué importa en ciberseguridad?
+La inspección del archivo resultante confirma que `aplicacion.efi` fue generado como `PE32+ executable (EFI application) x86-64`, lo cual es consistente con la especificación de UEFI. Esto valida que la conversión final fue correcta y que el binario ya no debe interpretarse como un ejecutable ELF convencional.
+
+En consecuencia, herramientas orientadas exclusivamente a ELF no resultan adecuadas para extraer todos sus metadatos. El dato relevante para esta práctica es que el firmware espera un ejecutable PE/COFF y que la herramienta `file` lo reconoce explícitamente como una aplicación EFI.
+
+La elección de `PE32+` para arquitecturas de 64 bits responde a la compatibilidad histórica de UEFI con el ecosistema PE/COFF y a la necesidad de contar con un formato bien definido para secciones, cabeceras y relocalización. Que el binario sea `x86-64` además debe coincidir con la arquitectura del firmware virtual utilizado; un desajuste entre arquitectura de la imagen y del firmware impediría su carga.
+
+![](../part2_development_compilation_security_analysis/img/2.png "pseudocodigo de efi_main en Ghidra")
+
+![](../part2_development_compilation_security_analysis/img/3.png "desensamblado asociado a la comparacion con 0xCC")
+
+En Ghidra se observa que la función `efi_main` conserva la estructura esencial del programa: inicialización de la biblioteca, llamada al método `OutputString` de `ConOut` e inspección del byte almacenado localmente antes de imprimir el segundo mensaje. El desensamblado también permite ubicar la comparación contra `0xCC`, lo que conecta el comportamiento esperado en tiempo de ejecución con su representación a bajo nivel.
+
+En el pseudocódigo puede verse además que las llamadas a los servicios de salida no aparecen como una invocación directa a una función de C estándar, sino como desreferenciaciones de punteros a funciones obtenidos desde estructuras del firmware. Esa observación es importante porque refleja con fidelidad el modelo de programación de UEFI: la interacción con el entorno se realiza a través de tablas y protocolos, no mediante syscalls ni bibliotecas del sistema operativo.
+
+**Pregunta:** *En el pseudocódigo de Ghidra, la condición 0xCC suele aparecer como -52. ¿A qué se debe este fenómeno y por qué importa en ciberseguridad?*
 
 Aparece como -52 por una interpretacion binaria al ser 1100 1100 se interpreta en complementa a dos, es decir, el 1 mas significativo nos indica que es negativo, luego se invierten los bits y se suma 1 para obtener el valor absoluto,
 haciendo esto se consigue 0011 0100 que es igual a 52.
 Es importante en ciberseguridad dado que representa la INT 3, que es la instruccion en el lenguaje assembler x86/x64 que realiza una pausa en la ejecucion del programa y genera un "breakpoint exception", esto permite realizar diversas inspecciones.
 Ej.: En los exploits por buffer overflow 0xCC se usa a menudo como un marcador para rastrear el flujo de ejecución o asegurar que el código llegue al lugar correcto.
+
+Más formalmente, el valor `0xCC` puede ser mostrado por un descompilador como entero con signo de 8 bits, cuyo rango es `-128` a `127`. En ese dominio, `0xCC` equivale a `204` sin signo, pero a `-52` con signo. Comprender esta diferencia es relevante al auditar binarios, ya que una lectura incorrecta del tipo de dato puede hacer que un analista pase por alto constantes significativas, marcadores de depuración o secuencias de instrucciones con valor semántico en una investigación de seguridad.
+
+# Trabajo Práctico 3: Ejecución en Hardware Físico (Bare Metal)
+
+## Preparación del medio de arranque (USB)
+
+En esta etapa el objetivo es trasladar al hardware físico el binario generado en la parte 2, respetando los requisitos de arranque de la especificación UEFI. Para ello se utiliza un pendrive formateado en `FAT32`, ya que este sistema de archivos es el contemplado por la especificación para la partición del sistema EFI y permite que el firmware localice de forma estándar ejecutables `.efi`.
+
+La estrategia consiste en preparar el dispositivo USB con dos elementos principales: una shell UEFI en la ruta por defecto `EFI/BOOT/BOOTX64.EFI`, que será utilizada como primer punto de entrada, y la aplicación `aplicacion.efi` copiada a la raíz del dispositivo para su ejecución manual desde dicha shell. Este enfoque evita depender de un sistema operativo instalado en el equipo y permite validar el comportamiento del binario directamente en el contexto del firmware real.
+
+```bash
+# 1. Identificar el dispositivo USB
+lsblk
+
+# 2. Formatear en FAT32
+sudo mkfs.vfat -F 32 /dev/sdb1
+
+# 3. Montar el pendrive
+sudo mount /dev/sdb1 /mnt
+
+# 4. Crear la estructura de arranque UEFI estándar
+sudo mkdir -p /mnt/EFI/BOOT
+
+# 5. Descargar la shell UEFI oficial de TianoCore
+sudo wget https://github.com/tianocore/edk2/raw/UDK2018/ShellBinPkg/UefiShell/X64/Shell.efi \
+    -O /mnt/EFI/BOOT/BOOTX64.EFI
+
+# 6. Copiar la aplicación compilada en el TP2
+sudo cp ../part2_development_compilation_security_analysis/uefi_security_lab/build/aplicacion.efi /mnt/
+
+# 7. Sincronizar y desmontar
+sudo sync
+sudo umount /mnt
+```
+
+La ubicación `EFI/BOOT/BOOTX64.EFI` no es arbitraria: corresponde a la ruta de fallback definida por UEFI para medios removibles de 64 bits. Si el firmware no encuentra una entrada de arranque previamente registrada en NVRAM para ese medio, puede igualmente localizar esa ruta predeterminada e iniciar la shell allí ubicada.
+
+## Configuración del BIOS/UEFI
+
+Una vez preparado el dispositivo, fue necesario ajustar la configuración del firmware de la computadora física para permitir la ejecución del entorno de prueba. En particular, se deshabilitó `Secure Boot`, ya que tanto la shell descargada como la aplicación generada durante el trabajo práctico no están firmadas por una autoridad reconocida por el firmware del fabricante.
+
+Desde el punto de vista de seguridad, `Secure Boot` actúa como un mecanismo de validación criptográfica de la cadena de arranque: solo permite cargar binarios EFI cuya firma pueda verificarse contra claves confiables almacenadas en firmware. Esto protege contra bootkits y cargadores maliciosos, pero también bloquea cualquier binario experimental o académico que no haya sido firmado adecuadamente. Por eso, para esta práctica, fue necesario desactivar temporalmente dicha protección.
+
+## Ejecución en Bare Metal
+
+Con el pendrive preparado y la configuración del firmware ajustada, la ejecución en bare metal consiste en arrancar el equipo desde el medio removible, ingresar a la shell UEFI y lanzar manualmente la aplicación compilada. A diferencia del entorno emulado, aquí el binario se ejecuta sobre el firmware y el hardware reales del equipo, lo que permite verificar compatibilidad práctica con la implementación UEFI del fabricante.
+
+
+```plaintext
+Shell> FS0:
+FS0:\> ls
+FS0:\> aplicacion.efi
+```
+
+Una vez ralizada la ejecucion de los comandos propuestos, obtuvimos el siguiente comportamiento (observado en la siguiente captura):
+
+
+
+Si la ejecución es correcta, el firmware debe transferir el control al punto de entrada `efi_main` de la imagen cargada y la salida debe imprimirse a través del protocolo de consola del sistema, sin intervención de un kernel ni de un sistema operativo anfitrión. Esto demuestra que el binario construido en la parte 2 no solo posee el formato correcto, sino que también es funcional en un entorno UEFI real.
+
+![](../part3_execution_on_physical_hardware/img/UEFI_Shell_Not_Working.jpeg "Salida de la shell UEFI al ejecutar aplicacion.efi")
+
+Texto esperado en pantalla:
+
+```plaintext
+Iniciando analisis de seguridad...
+Breakpoint estatico alcanzado.
+```
+
+La realidad es que al ejecutar `aplicacion.efi` en el hardware físico, la shell UEFI no mostró la salida esperada y se mantuvo sin respuesta. Esto sugiere que, aunque el binario fue reconocido y ejecutado, no logró interactuar correctamente con los servicios de salida del firmware o que hubo un error en la ejecución que impidió que el mensaje se imprimiera.
+
+**Pregunta:** *¿Por qué fue necesario deshabilitar Secure Boot para ejecutar la shell UEFI y la aplicación desarrollada en la práctica?*
+
+Fue necesario deshabilitar `Secure Boot` porque este mecanismo solo permite ejecutar binarios EFI firmados por entidades cuyas claves estén registradas como confiables en el firmware. Tanto la shell UEFI utilizada como `aplicacion.efi` son artefactos de laboratorio y no cuentan con una firma reconocida por el fabricante del equipo, por lo que el firmware los rechazaría con un error de violación de seguridad si esa protección permaneciera activa.
+
+Desde una perspectiva técnica, esto confirma que `Secure Boot` no evalúa si el binario "parece legítimo" por su nombre o ubicación, sino si la imagen PE/COFF contiene una firma válida encadenable a una base de confianza instalada en la plataforma. En consecuencia, la práctica también evidencia la tensión entre flexibilidad de experimentación y garantías de integridad en la cadena de arranque.
+
+# Conclusión
+
+El desarrollo de este trabajo práctico permitió recorrer de forma progresiva las principales capas del entorno UEFI, desde la exploración inicial de sus abstracciones de hardware hasta la compilación y ejecución de una aplicación nativa fuera de un sistema operativo convencional. A lo largo de la práctica se observó que UEFI no debe entenderse únicamente como un reemplazo moderno del BIOS, sino como una plataforma de firmware con servicios, protocolos y estructuras propias, capaces de ofrecer un entorno de ejecución relativamente estandarizado en la etapa de prearranque.
+
+En la primera parte, el análisis de handles, protocolos, variables de NVRAM y mapas de memoria permitió comprender cómo el firmware organiza los recursos del sistema y cómo define la secuencia de arranque a través de políticas persistentes. En la segunda parte, la construcción de una aplicación en C y su transformación al formato `PE/COFF` mostró las particularidades del desarrollo de software UEFI, donde no existe una infraestructura equivalente a la de un proceso en espacio de usuario y toda interacción debe canalizarse mediante servicios del propio firmware. Finalmente, la tercera parte permitió trasladar ese conocimiento al hardware físico y evidenciar que la ejecución bare metal introduce restricciones y comportamientos adicionales, tales como la necesidad de deshabilitar `Secure Boot` y las diferencias prácticas entre un entorno emulado y la implementación concreta del firmware de un fabricante.
+
+El resultado general de la experiencia no solo aporta una comprensión más precisa del flujo de arranque y del formato de los binarios EFI, sino también una visión relevante desde la seguridad ofensiva y defensiva. El estudio de regiones persistentes de memoria, variables globales y mecanismos como `Secure Boot` muestra con claridad por qué UEFI constituye un punto crítico dentro de la cadena de confianza del sistema. En consecuencia, este trabajo no solo cumple un objetivo de familiarización técnica, sino que también sienta una base sólida para analizar riesgos, capacidades de persistencia y mecanismos de protección en plataformas modernas.
