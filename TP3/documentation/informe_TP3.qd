@@ -181,108 +181,6 @@ mayor control sobre la secuencia de arranque.
   firmware y reducir componentes innecesarios, aunque esto depende de la
   plataforma concreta.
 
-# Linker
-
-Un **linker** es la herramienta encargada de tomar uno o más archivos objeto y
-combinarlos para producir un archivo final ejecutable, una biblioteca o, como
-en este caso, una imagen binaria de arranque. Su tarea principal es ubicar
-las secciones del programa en memoria, resolver referencias entre símbolos y
-generar un formato de salida coherente con el destino deseado.
-
-El **linker** no solo une el código ensamblado, sino que además
-define en qué dirección debe quedar ubicado dentro de la imagen booteable.
-
-## Dirección 0x7c00 y su importancia
-
-En el script del **linker** aparece la dirección `0x7c00`. Esa es la dirección de
-memoria física en la que el BIOS carga tradicionalmente el sector de arranque
-cuando encuentra un disco booteable.
-
-Esta dirección es necesaria porque el programa debe quedar enlazado suponiendo
-que comenzará a ejecutarse desde esa ubicación. Si el **linker** no conoce esa
-dirección, no puede calcular correctamente las posiciones de etiquetas,
-mensajes o saltos dentro del código.
-
-Esto puede verse directamente en el script `link.ld`:
-
-```ld
-SECTIONS
-{
-    . = 0x7c00;
-    .text :
-    {
-        __start = .;
-        *(.text)
-        . = 0x1FE;
-        SHORT(0xAA55)
-    }
-}
-```
-
-En este fragmento se fija la dirección base `0x7c00`, que es donde el BIOS
-carga el sector de arranque en memoria, y también se especifica la firma final
-`0xAA55`, que debe quedar ubicada en los últimos dos bytes del sector.
-
-## Comparativa de objdump y hd
-
-El archivo `compilarycorrer.sh` automatiza el armado y la prueba del ejemplo.
-Primero ejecuta `as` para generar `main.o`, luego usa `ld` junto con `link.ld`
-para construir `main.img`, y finalmente corre esa imagen con QEMU. Gracias a
-eso, con un único script puede compilarse y verificarse el arranque del
-programa.
-
-![Ejecución del Hello World en QEMU](../bios_uefi/img/helloWorld.png)
-
-Al ejecutar el script, QEMU muestra en pantalla el mensaje `hello world`, lo
-que confirma que el sector fue cargado correctamente por el BIOS y que el
-código del bootloader llegó a ejecutarse.
-
-Luego, al comparar las salidas de `objdump -S main.o` con `hd main.img`, se observa el mismo
-programa desde dos perspectivas distintas: `objdump` muestra el código
-ensamblado en forma de instrucciones, mientras que `hd` muestra la imagen final
-byte a byte.
-
-![Salida de objdump sobre main.o](../bios_uefi/img/objdump.png)
-
-En la salida de `objdump` se ven desplazamientos pequeños dentro del archivo
-objeto, por ejemplo `0`, `5`, `e` y `f`. Eso ocurre porque `main.o` todavía es
-un objeto intermedio. La dirección real de carga `0x7c00` no aparece allí como
-dirección visible de ejecución, ya que `objdump` muestra offsets relativos
-dentro del objeto y no la ubicación final en memoria.
-
-![Volcado hexadecimal de main.img](../bios_uefi/img/hd.png)
-
-En `hd`, en cambio, puede verse la imagen final completa. Los primeros bytes
-del archivo corresponden al código máquina del programa, y enseguida aparece la
-cadena `hello world` en la columna ASCII. Esto indica que el programa fue
-colocado al comienzo del sector booteable. Sin embargo, tampoco aquí se ve de
-forma directa la dirección `0x7c00`, porque `hd` muestra el archivo en disco y
-no la memoria RAM. Lo que sí puede verificarse es que ese contenido será el que
-el BIOS copie luego a memoria en la dirección indicada por el linker.
-
-También se observa al final de la imagen la firma `55 aa`, ubicada en el
-offset `0x1FE`. Esa es la representación en bytes de la firma de arranque
-definida en el linker mediante `SHORT(0xAA55)`. En otras palabras, en el script
-se expresa como `0xAA55`, pero en el volcado hexadecimal se ve almacenada como
-`55 aa` en los últimos dos bytes del sector.
-
-Por lo tanto, `objdump` y `hd` permiten verificar el contenido del programa y
-su ubicación dentro de la imagen, mientras que la dirección de carga `0x7c00`
-se determina a partir del script del linker y del comportamiento estándar del
-BIOS.
-
-
-## Opción `--oformat binary` en el linker
-
-La opción **`--oformat binary`** se utiliza para que el linker genere una salida en
-**binario plano**, sin encabezados ELF ni metadatos adicionales. Esto es
-fundamental en un MBR, porque el BIOS no espera un archivo ejecutable con
-estructura compleja, sino un sector crudo de 512 bytes que pueda copiar a
-memoria y ejecutar directamente.
-
-Sin esta opción, el resultado del enlazado sería un archivo con formato de
-objeto o ejecutable estándar, que no serviría como sector de arranque.
-
 # Depuración con GDB Dashboard
 
 Para depurar el programa se ejecutó QEMU con las opciones `-s -S`, lo que
@@ -338,68 +236,6 @@ La captura muestra que el programa logró entrar en modo protegido y escribir el
 mensaje en pantalla correctamente, cumpliendo el mismo objetivo que en la etapa
 anterior, pero ahora con segmentación y ejecución de 32 bits.
 
-## Programa con dos descriptores de memoria diferentes, uno para código y otro para datos
-
-En este cado, el programa define en su GDT descriptores con **base** y **límite**
-distintos para cada segmento. En lugar de tener código y datos comenzando ambos
-en base `0x00000000` y cubriendo toda la memoria, el descriptor de código
-podría apuntar, por ejemplo, a una región donde solo reside el código
-ejecutable, mientras que el descriptor de datos podría apuntar a otra región
-separada para variables, buffers o pila.
-
-En ese esquema, el procesador traduce las direcciones lógicas usando el
-selector cargado en cada registro de segmento. Así, `CS` referenciaría el
-espacio de código y `DS` o `SS` el espacio de datos. La ventaja es que permite
-separar responsabilidades, limitar accesos y detectar errores cuando un acceso
-intenta salir de los límites definidos para un segmento.
-
-## Segmento de datos de solo lectura
-
-Si se modifican los bits de acceso del descriptor de datos para que el segmento
-no admita escritura, una instrucción que intente almacenar allí debería generar
-una **excepción de protección general**. Es decir, el procesador detecta que el
-tipo de acceso no está permitido para ese descriptor y aborta la operación.
-
-Para realizar esta experiencia se aprovechó la línea comentada dentro de
-`main.S`, en la definición de `gdt_data`, donde puede cambiarse el byte de
-acceso del descriptor. En la versión normal del programa se usa:
-
-```asm
-.byte 0b10010010
-```
-
-mientras que para la prueba se reemplazó temporalmente por la línea comentada:
-
-```asm
-#.byte 0b10010000
-```
-
-De esa manera, el descriptor de datos quedó configurado con permisos más
-restrictivos, de modo que al intentar escribir en ese segmento el procesador
-debía detectar una violación de protección.
-
-En la ejecución práctica con QEMU, el resultado observado fue que el emulador
-quedó en una especie de reinicio constante. Esto es consistente con el
-comportamiento esperado para un programa mínimo que no tiene una IDT completa
-ni manejadores de excepciones instalados: al producirse la falta de protección,
-el procesador no puede atenderla correctamente, deriva en una falla más grave y
-la máquina virtual termina reiniciándose repetidamente.
-
-## Registros de segmento en modo protegido
-
-En modo protegido los registros de segmento no se cargan con direcciones
-físicas, sino con **selectores**. En este trabajo se usa `0x08` para el
-segmento de código y `0x10` para el segmento de datos. Esos valores no son
-arbitrarios: apuntan a entradas concretas dentro de la GDT.
-
-El selector `0x08` referencia el segundo descriptor de la tabla, que es el de
-código, mientras que `0x10` referencia el tercero, que es el de datos. Esto
-ocurre porque cada entrada de la GDT ocupa 8 bytes y el índice del descriptor
-se codifica dentro del selector. Por eso, al pasar a modo protegido, los
-registros `CS`, `DS`, `ES`, `FS`, `GS` y `SS` deben cargarse con selectores
-válidos y no con una dirección lineal como sucedía conceptualmente en modo
-real.
-
 # Conclusión
 
 El desarrollo de este trabajo permitió recorrer de forma práctica distintas
@@ -445,39 +281,38 @@ para imprimir mensajes en pantalla durante la etapa de arranque.
 
 **¿Menciona casos de bugs de UEFI que puedan ser explotados?**
 
-Sí. Existen antecedentes importantes de vulnerabilidades explotables en
+Existen antecedentes importantes de vulnerabilidades explotables en
 implementaciones UEFI y en componentes de la cadena de arranque moderna. Un
 caso conocido es **LogoFAIL**, publicado en 2023, donde se encontraron fallas
 en analizadores de imágenes embebidos en distintos firmwares UEFI. A través de
 imágenes manipuladas especialmente, un atacante podía alcanzar ejecución de
 código durante el arranque incluso antes del sistema operativo.
 
-Otro caso relevante es **BootHole**, divulgado en 2020, relacionado con GRUB2
-en contextos de arranque seguro. Bajo ciertas condiciones, permitía ejecutar
-código no confiable durante el proceso de boot y comprometer la cadena de
-confianza. Estos ejemplos muestran que las fallas en firmware o en los
-componentes cercanos al arranque son especialmente críticas porque operan con
-gran privilegio y afectan etapas previas a la carga del sistema operativo.
-
 **¿Qué es Converged Security and Management Engine (CSME), the Intel Management Engine BIOS Extension (Intel MEBx).?**
 
 **Converged Security and Management Engine (CSME)** es un subsistema presente
 en muchas plataformas Intel modernas. Opera sobre un microcontrolador separado
-del procesador principal y sigue activo incluso cuando el sistema operativo
+del procesador principal que corre un SO basado en MINIXS y sigue activo incluso cuando el sistema operativo
 todavía no arrancó o cuando la máquina se encuentra en ciertos estados de bajo
-consumo. Su rol incluye tareas de seguridad, gestión remota, arranque
+consumo. El CSME tiene su propia porción de memoria no volátil (NVM) dentro del chip de la memoria Flash del BIOS.
+Su rol incluye tareas de seguridad, gestión remota, arranque
 confiable, inicialización de la plataforma y otros servicios auxiliares
 relacionados con el firmware.
 
+**Ejemplo:** Intel Boot Guard: Antes de que se vea el logo del sistema operativo, el CSME
+verifica que el firmware de la placa base no haya sido modificado por un malware.
+Si las firmas digitales del BIOS/UEFI sea la del fabricante, si no coinciden, la PC simplemente
+no arranca para proteger al usuario.
+Una vez que el BIOS es declarado "seguro", este toma el control y busca el cargador de arranque (GRUB).
+Aquí es donde entra el Secure Boot.
+
 Dentro de ese ecosistema se encuentra **Intel Management Engine BIOS Extension
 (Intel MEBx)**, que es la interfaz de configuración accesible desde el propio
-firmware. Mediante MEBx pueden ajustarse parámetros del motor de gestión de
-Intel, especialmente en entornos empresariales donde se aprovechan funciones
-de administración remota, aprovisionamiento y políticas de seguridad. En otras
-palabras, CSME es el subsistema de fondo que ejecuta esas capacidades, mientras
-que MEBx es una interfaz de configuración para administrarlas desde el firmware.
+firmware que le permite al usuario comunicarse con el CSME.
+Cuando se cambia una opción en la MEBx se envía esa instrucción a través de una interfaz
+llamada HECI (Host Embedded Controller Interface).
 
-**¿Qué es coreboot ? ¿Qué productos lo incorporan ?¿Cuales son las ventajas de su utilización?**
+**¿Qué es coreboot? ¿Qué productos lo incorporan? ¿Cuales son las ventajas de su utilización?**
 
 **Coreboot** es un proyecto de firmware libre diseñado para reemplazar BIOS o
 firmware propietario por una etapa de inicialización mínima, rápida y
@@ -494,30 +329,95 @@ equipos de laboratorio y hardware personalizado.
 
 Sus ventajas principales son:
 
-- reduce el tiempo de arranque al minimizar la lógica ejecutada en firmware
-- permite una mayor auditabilidad del código respecto de soluciones cerradas
-- brinda flexibilidad para elegir la carga útil más adecuada según el objetivo del sistema
-- facilita tareas de investigación, depuración y personalización del proceso de arranque
-- puede mejorar la seguridad al hacer más visible el comportamiento del firmware y reducir componentes innecesarios
+- Reduce el tiempo de arranque al minimizar la lógica ejecutada en firmware.
+- Permite una mayor auditabilidad del código respecto de soluciones cerradas.
+- Brinda flexibilidad para elegir la carga útil más adecuada según el objetivo del sistema.
+- Facilita tareas de investigación, depuración y personalización del proceso de arranque.
+- Puede mejorar la seguridad al hacer más visible el comportamiento del firmware y reducir componentes innecesarios.
 
 **¿Que es un linker? ¿Que hace?**
 
+Un **linker** (o enlazador) es un programa que forma parte de la cadena de herramientas de compilación. Su función es combinar uno o más archivos objeto (archivos `.o` generados por el ensamblador o compilador) y bibliotecas en un único archivo ejecutable. 
 
+Durante el proceso de enlazado, el linker realiza varias tareas cruciales:
+
+- **Resolución de símbolos**: identifica referencias simbólicas entre archivos objeto (por ejemplo, una función definida en un módulo que es llamada desde otro) y asigna direcciones de memoria concretas a cada símbolo.
+- **Reubicación**: determina y resuelve la ubicación de memoria absoluta donde deben cargarse estos códigos.
+- **Generación de la salida**: produce un archivo ejecutable en el formato especificado (ELF, PE/COFF, binario plano, etc.) que contiene el código máquina completo y listo para ejecutarse.
+
+En el caso de un MBR o bootloader, el linker es fundamental porque debe conocer exactamente dónde residirá el código en memoria (típicamente `0x7c00` para un sector de arranque) y generar instrucciones de salto y referencias de memoria con esas direcciones precalculadas.
 
 **¿Que es la dirección que aparece en el script del linker? ¿Porqué es necesaria?**
 
+La dirección que aparece en el script del linker (en este trabajo, `0x7c00`) es la **dirección base de carga** del programa. Corresponde a la ubicación en memoria física o virtual donde el firmware (BIOS o UEFI) colocará el código ejecutable.
+
+Esta dirección es necesaria porque:
+
+- El linker debe calcular las direcciones de todas las instrucciones, etiquetas y saltos relativos. Sin conocer dónde comienza el código en memoria, no puede generar referencias correctas.
+- En el caso del MBR, el BIOS siempre carga el sector de arranque en la dirección `0x7c00`. El script del linker debe fijar esta dirección para que cuando el código se ejecute, todas las referencias internas sean válidas.
+
+En el script `link.ld`, la línea 7: `. = 0x7c00;` establece explícitamente que el contador de ubicación comienza en `0x7c00`. Esto garantiza que todas las direcciones calculadas sean relativas a ese punto de partida.
 
 
-**¿Para que se utiliza la opción --oformat binary en el linker?**
 
+**¿Para que se utiliza la opción `--oformat binary` en el linker?**
 
+La opción **`--oformat binary`** en el linker genera una salida en **formato binario plano**, sin encabezados, tablas de símbolos, información de reubicación ni otros metadatos típicos de formatos ejecutables como ELF o PE/COFF. 
+
+Esta opción es esencial para crear un MBR porque:
+
+- El BIOS no espera un archivo ejecutable estructurado, sino un **sector crudo de 512 bytes** que pueda copiar directamente a memoria en `0x7c00` y ejecutar sin procesamiento adicional.
+- Un archivo con formato ELF o similar contendría encabezados que ocuparían espacio valioso y resultarían en una estructura no válida para el BIOS.
+- Con `--oformat binary`, el resultado es solo el código máquina puro, seguido de los datos necesarios (como la firma `0xAA55` al final), sin ningún metadato innecesario.
+
+En este trabajo, gracias a esta opción, el linker genera exactamente 512 bytes con el contenido apropiado, que puede ejecutarse directamente como sector de arranque.
 
 **¿Cómo sería un programa que tenga dos descriptores de memoria diferentes, uno para cada segmento (código y datos) en espacios de memoria diferenciados?**
 
+En este caso, la GDT(Global Descriptor Table) contendría al menos tres descriptores: uno nulo (requerido por el estándar x86), uno para el segmento de código y otro para el segmento de datos. Cada descriptor definiría una **base** y un **límite** distintos, apuntando a regiones separadas de memoria.
 
+La ventaja de esta arquitectura es que el procesador puede **validar los accesos**: si un acceso de datos intenta traspasar el límite, o si se intenta ejecutar código desde un registro que no es el que le corresponde, se genera una excepción de protección general. Esto facilita la detección de errores y aumenta la robustez del sistema.
 
 **Cambiar los bits de acceso del segmento de datos para que sea de solo lectura, intentar escribir, ¿Que sucede? ¿Que debería suceder a continuación?**
 
+Cuando se modifica el byte de acceso del descriptor de datos para que no admita escritura (cambiando `0b10010010` por `0b10010000`), el segmento queda configurado como **solo lectura**.
 
+**¿Qué sucede?**
+
+Si un programa intenta ejecutar una instrucción de escritura (como `mov [dirección], valor`) en ese segmento, el procesador detecta la violación de protección y genera una **excepción de protección general** (General Protection Fault, GPF). En un sistema con un manejador de excepciones completo, esta excepción podría capturarse y manejarse apropiadamente.
+
+**¿Qué debería suceder a continuación?**
+
+En un entorno de producción completo:
+
+1. El procesador genera una **interrupción de excepción** (típicamente `int 0x0D` para GPF).
+2. El sistema operativo o firmware consulta la IDT (Interrupt Descriptor Table) para encontrar el manejador de la excepción.
+3. El manejador puede tomar distintas acciones: registrar el error, abortar el programa, generar un signal al proceso, etc.
+
+Sin embargo, en este trabajo experimental con un programa mínimo que carece de una IDT completa:
+
+- El procesador no encuentra un manejador válido para la excepción.
+- La máquina virtual (QEMU) queda en un estado inconsistente y se reinicia repetidamente, tal como se observó al intentar la experiencia.
+
+Esto demuestra que la protección de segmento es efectiva: detecta intentos ilícitos de acceso, pero también resalta la necesidad de una infraestructura de excepciones robusta para manejar tales situaciones de forma controlada.
 
 **En modo protegido, ¿Con qué valor se cargan los registros de segmento? ¿Porque?**
+
+En modo protegido, los registros de segmento (`CS`, `DS`, `ES`, `FS`, `GS` y `SS`) se cargan con **selectores**, no con direcciones directas como en modo real. Un selector es un valor de 16 bits que contiene:
+
+- Un **índice** que apunta a una entrada específica en la GDT (Global Descriptor Table) o LDT (Local Descriptor Table).
+- Un **bit de tabla** que indica si usar GDT o LDT.
+- Un **nivel de privilegio** (RPL: Requested Privilege Level).
+
+En este trabajo se utilizan:
+
+- **Selector `0x08`** para el segmento de código (CS). Este valor apunta al segundo descriptor de la GDT (la entrada nula ocupa el slot 0, por lo que el índice 1 resulta en `0x08 = 1 << 3`).
+- **Selector `0x10`** para el segmento de datos (DS). Este valor apunta al tercer descriptor de la GDT (índice 2, lo que resulta en `0x10 = 2 << 3`).
+
+**¿Por qué es así?**
+
+Porque en x86, cada entrada de la GDT ocupa exactamente 8 bytes. El procesador calcula la dirección de un descriptor multiplicando el índice (extraído del selector) por 8. Así:
+
+- Índice 0: descriptor nulo, offset `0x00`
+- Índice 1: descriptor de código, offset `0x08`
+- Índice 2: descriptor de datos, offset `0x10`

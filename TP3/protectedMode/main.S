@@ -39,8 +39,20 @@ gdt_data:
     .word 0xffff
     .word 0x0
     .byte 0x0
+    
+    #P DLP S TIPO A
     .byte 0b10010010
+    # A = 0, Accedido, el CPU lo pone a 1 en el primer acceso.
+    # TIPO -> W = 1 Escribible, ED = 0 No expand down, 
+    # E = 0 No ejecutable.
+    # S = 1 Segmento "normal", no sistema.
+    # DPL = 00 (nivel de privilegio 0, el más alto)
+    # P = 1 Segmento presente en memoria.
+
+    # Ejemplo practico: Cambiar el bit de acceso para solo lectura.
+    # W = 0, no escribible.
     #.byte 0b10010000 # Read/write, accessed bit cleared to 0 so the CPU sets it to 1 on first access
+    
     .byte 0b11001111
     .byte 0x0
 gdt_end:
