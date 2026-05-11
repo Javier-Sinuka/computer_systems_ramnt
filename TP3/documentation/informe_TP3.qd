@@ -181,6 +181,56 @@ mayor control sobre la secuencia de arranque.
   firmware y reducir componentes innecesarios, aunque esto depende de la
   plataforma concreta.
 
+# Linker
+
+## Comparativa de objdump y hd
+
+El archivo `compilarycorrer.sh` automatiza el armado y la prueba del ejemplo.
+Primero ejecuta `as` para generar `main.o`, luego usa `ld` junto con `link.ld`
+para construir `main.img`, y finalmente corre esa imagen con QEMU. Gracias a
+eso, con un único script puede compilarse y verificarse el arranque del
+programa.
+
+![Ejecución del Hello World en QEMU](../bios_uefi/img/helloWorld.png)
+
+Al ejecutar el script, QEMU muestra en pantalla el mensaje `hello world`, lo
+que confirma que el sector fue cargado correctamente por el BIOS y que el
+código del bootloader llegó a ejecutarse.
+
+Luego, al comparar las salidas de `objdump -S main.o` con `hd main.img`, se observa el mismo
+programa desde dos perspectivas distintas: `objdump` muestra el código
+ensamblado en forma de instrucciones, mientras que `hd` muestra la imagen final
+byte a byte.
+
+![Salida de objdump sobre main.o](../bios_uefi/img/objdump.png)
+
+En la salida de `objdump` se ven desplazamientos pequeños dentro del archivo
+objeto, por ejemplo `0`, `5`, `e` y `f`. Eso ocurre porque `main.o` todavía es
+un objeto intermedio. La dirección real de carga `0x7c00` no aparece allí como
+dirección visible de ejecución, ya que `objdump` muestra offsets relativos
+dentro del objeto y no la ubicación final en memoria.
+
+![Volcado hexadecimal de main.img](../bios_uefi/img/hd.png)
+
+En `hd`, en cambio, puede verse la imagen final completa. Los primeros bytes
+del archivo corresponden al código máquina del programa, y enseguida aparece la
+cadena `hello world` en la columna ASCII. Esto indica que el programa fue
+colocado al comienzo del sector booteable. Sin embargo, tampoco aquí se ve de
+forma directa la dirección `0x7c00`, porque `hd` muestra el archivo en disco y
+no la memoria RAM. Lo que sí puede verificarse es que ese contenido será el que
+el BIOS copie luego a memoria en la dirección indicada por el linker.
+
+También se observa al final de la imagen la firma `55 aa`, ubicada en el
+offset `0x1FE`. Esa es la representación en bytes de la firma de arranque
+definida en el linker mediante `SHORT(0xAA55)`. En otras palabras, en el script
+se expresa como `0xAA55`, pero en el volcado hexadecimal se ve almacenada como
+`55 aa` en los últimos dos bytes del sector.
+
+Por lo tanto, `objdump` y `hd` permiten verificar el contenido del programa y
+su ubicación dentro de la imagen, mientras que la dirección de carga `0x7c00`
+se determina a partir del script del linker y del comportamiento estándar del
+BIOS.
+
 # Depuración con GDB Dashboard
 
 Para depurar el programa se ejecutó QEMU con las opciones `-s -S`, lo que

@@ -39,7 +39,7 @@ gdt_data:
     .word 0xffff
     .word 0x0
     .byte 0x0
-    
+
     #P DLP S TIPO A
     .byte 0b10010010
     # A = 0, Accedido, el CPU lo pone a 1 en el primer acceso.
