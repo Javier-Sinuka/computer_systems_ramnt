@@ -14,6 +14,77 @@
 
 .tableofcontents
 
+# Desarrollo
+
+En esta sección se documenta el procedimiento realizado para compilar, cargar, inspeccionar y descargar un módulo del kernel en Linux. La secuencia se expone de manera procedural, siguiendo el orden de ejecución observado en las capturas relevadas durante la práctica. El trabajo se realizó sobre el directorio correspondiente a la primera parte del proyecto de módulos, y posteriormente se emplearon herramientas de inspección del kernel para verificar tanto el estado de carga como los metadatos del módulo.
+
+## Compilación y preparación del módulo
+
+En primer lugar, se ingresó al directorio de trabajo correspondiente a la primera parte del ejercicio y se ejecutó `make` sobre el módulo. Esta acción invocó el sistema de compilación del kernel para construir el objeto cargable `mimodulo.ko`. Tal como se verificó previamente, la compilación no presentó errores fatales: el proceso generó el artefacto esperado del módulo y dejó disponible el binario para su posterior inserción en el kernel.
+
+Una vez finalizada la compilación, se procedió a cargar el módulo mediante `sudo insmod mimodulo.ko`. Dado que `insmod` no suele producir una salida descriptiva por sí mismo cuando la operación es exitosa, la validación de la carga se realizó consultando el buffer de mensajes del kernel con `sudo dmesg`.
+
+```bash
+cd part1/module
+make
+sudo insmod mimodulo.ko
+sudo dmesg
+```
+
+La salida obtenida en `dmesg` evidenció tres aspectos relevantes: el kernel detectó la carga de un módulo externo (`out-of-tree`), informó que la verificación de firma no pudo completarse por ausencia de una clave requerida, y finalmente confirmó que el módulo fue cargado correctamente. Esto resulta coherente con una práctica académica en la que se trabaja con un módulo propio no firmado por una clave de confianza del sistema.
+
+![](images/1_sudo_dmesg.jpeg "Salida de dmesg luego de cargar mimodulo")
+
+## Verificación de carga del módulo
+
+Luego de la inserción, se utilizó `lsmod | grep mod` para verificar que el módulo efectivamente había quedado registrado entre los módulos actualmente cargados. La salida mostró la entrada correspondiente a `mimodulo`, junto con su tamaño en memoria y su contador de uso.
+
+```bash
+lsmod | grep mod
+```
+
+![](images/2_lsmod_grep_mod.jpeg "Verificación de mimodulo mediante lsmod")
+
+La presencia de `mimodulo` en esta lista confirmó que el kernel había aceptado la inserción del módulo y que este permanecía residente en memoria al momento de la consulta.
+
+## Descarga del módulo y nueva verificación
+
+En una segunda etapa se procedió a retirar el módulo del kernel con `sudo rmmod mimodulo`. Una vez realizada la operación, se consultó nuevamente `dmesg` para observar el mensaje asociado a la descarga, y se volvió a ejecutar `lsmod | grep mod` para comprobar que el módulo ya no figuraba entre los módulos activos.
+
+```bash
+sudo rmmod mimodulo
+sudo dmesg
+lsmod | grep mod
+```
+
+La evidencia obtenida mostró el mensaje `Modulo descargado del kernel.` y, a continuación, la ausencia de `mimodulo` en la salida de `lsmod`, lo cual indica que la descarga se realizó de forma satisfactoria.
+
+![](images/3_luego_de_sudo_rmmod_mimodulo.jpeg "Descarga del módulo y verificación posterior")
+
+Adicionalmente, se ejecutó el comando `cat /proc/modules | grep mod` desde la terminal. En este caso no se obtuvo ninguna salida. Este comportamiento es consistente con el estado del sistema luego de haber descargado el módulo, ya que `/proc/modules` enumera únicamente los módulos cargados en ese instante y el filtrado aplicado con `grep mod` no encontró coincidencias relevantes una vez removido `mimodulo`.
+
+## Inspección de metadatos con `modinfo`
+
+Finalmente, se utilizaron consultas `modinfo` para inspeccionar los metadatos del módulo propio y compararlos con los de un módulo provisto por el sistema. En primer lugar, se consultó el archivo generado localmente:
+
+```bash
+modinfo mimodulo.ko
+```
+
+La salida permitió observar información característica del módulo compilado, incluyendo nombre, autor, descripción, licencia y la cadena `vermagic`, que expresa la compatibilidad del binario con la versión del kernel en ejecución.
+
+![](images/4_modinfo_mimodulo_ko.jpeg "Metadatos del módulo propio mediante modinfo")
+
+En segundo término, se inspeccionó un módulo perteneciente al árbol del sistema. Aunque en el esquema inicial la consulta se había pensado sobre una ruta terminada en `.ko`, en la práctica la ruta utilizada fue la que aparece en la captura, correspondiente al archivo comprimido del sistema:
+
+```bash
+modinfo /lib/modules/$(uname -r)/kernel/crypto/des_generic.ko.zst
+```
+
+Esta consulta permitió advertir una diferencia importante respecto del módulo desarrollado en la práctica: el módulo del sistema presenta metadatos adicionales vinculados con la firma criptográfica, tales como identificador de firma, firmante, clave de firma y bloque de firma. Esto refleja el mecanismo de integridad empleado por el kernel para módulos distribuidos oficialmente por el sistema.
+
+![](images/5_modinfo_lib_modules.jpeg "Inspección de un módulo del sistema con modinfo")
+
 # Respuestas
 
 ## Desafío 1
