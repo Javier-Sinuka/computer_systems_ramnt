@@ -85,6 +85,78 @@ Esta consulta permitió advertir una diferencia importante respecto del módulo 
 
 ![](images/5_modinfo_lib_modules.jpeg "Inspección de un módulo del sistema con modinfo")
 
+# Discusión y análisis complementario
+
+La presente sección reúne una serie de preguntas de análisis vinculadas con la experiencia realizada sobre módulos del kernel, mecanismos de observación del sistema y consideraciones de seguridad asociadas a `Secure Boot`. Se responde únicamente aquello efectivamente trabajado durante la práctica, dejando como pendiente las consignas que todavía no fueron desarrolladas por el grupo.
+
+## 1. ¿Qué diferencias se pueden observar entre los dos `modinfo`?
+
+La primera diferencia observable es el origen de cada módulo. `mimodulo.ko` corresponde a un módulo desarrollado y compilado manualmente durante la práctica, mientras que `des_generic.ko.zst` forma parte del árbol de módulos provisto por el sistema operativo. Esta diferencia de procedencia se refleja directamente en los metadatos mostrados por `modinfo`.
+
+En el caso de `mimodulo.ko`, la salida contiene información básica y mínima: nombre, autor, descripción, licencia, `srcversion`, `retpoline` y `vermagic`. Esto es consistente con un módulo académico simple, concebido para demostrar el proceso de compilación e inserción dinámica en el kernel. Por el contrario, el módulo del sistema exhibe una estructura de metadatos más rica: incluye múltiples alias, dependencias declaradas, el atributo `intree: Y`, e información explícita de firma criptográfica, como `sig_id`, `signer`, `sig_key`, `sig_hashalgo` y el bloque de `signature`.
+
+Una segunda diferencia relevante reside en la confianza e integración con el kernel. El módulo del sistema está firmado y reconocido como parte del árbol oficial (`in-tree`), mientras que `mimodulo.ko` es un módulo `out-of-tree`, no firmado por una clave confiable para el sistema. Esto explica por qué, al cargarlo, el kernel emitió advertencias de verificación de firma y marcó la inserción como potencialmente contaminante (`tainting kernel`). En consecuencia, ambos `modinfo` no solo describen módulos distintos desde el punto de vista funcional, sino también desde el punto de vista de la política de integridad y confianza del kernel.
+
+## 2. ¿Qué drivers/módulos están cargados en sus propias PC? Comparar las salidas con las computadoras de cada integrante del grupo. Expliquen las diferencias.
+
+**Consigna complementaria:** cargar un archivo `.txt` con la salida de cada integrante en el repositorio y agregar un `diff` en el informe.
+
+## 3. ¿Cuáles no están cargados pero están disponibles? ¿Qué pasa cuando el driver de un dispositivo no está disponible?
+
+Un módulo puede estar disponible sin encontrarse cargado cuando existe físicamente en el árbol `/lib/modules/$(uname -r)` pero no aparece en la lista de módulos activos obtenida con `lsmod` o consultando `/proc/modules`. En otras palabras, la disponibilidad se refiere a que el sistema posee el archivo del módulo y puede, en principio, cargarlo si una dependencia, un dispositivo o una acción administrativa lo requiere; la carga efectiva, en cambio, depende de que exista una necesidad concreta de activarlo.
+
+Dentro de la práctica, el módulo `des_generic.ko.zst` constituye un ejemplo representativo de esta situación. Fue posible inspeccionarlo con `modinfo`, lo que demuestra que estaba instalado y disponible en el sistema, pero no surgió evidencia de que estuviera cargado en memoria al momento de las verificaciones realizadas. Esta distinción muestra que el conjunto de módulos instalados suele ser considerablemente más amplio que el subconjunto efectivamente cargado durante una sesión.
+
+Cuando el driver de un dispositivo no está disponible, el kernel no puede asociar correctamente una implementación de control a ese hardware o a esa interfaz lógica. Como consecuencia, el dispositivo puede no ser detectado, puede aparecer identificado solo de manera genérica o puede quedar visible pero sin funcionalidad utilizable desde el espacio de usuario. En términos prácticos, esto implica pérdida total o parcial del servicio asociado: ausencia de conectividad en una placa de red, falta de audio, imposibilidad de montar un dispositivo de almacenamiento, o carencia de aceleración gráfica, entre otros casos.
+
+## 4. Correr `hwinfo` en una PC real con hardware real y agregar la URL de la información de hardware en el reporte.
+
+## 5. ¿Qué diferencia existe entre un módulo y un programa?
+
+La diferencia fundamental es que un programa convencional se ejecuta en espacio de usuario como un proceso aislado, con privilegios limitados y acceso al sistema a través de llamadas al sistema. Un módulo del kernel, en cambio, es una extensión dinámica del núcleo que se carga en espacio privilegiado y pasa a ejecutarse con los mismos privilegios que el kernel.
+
+Desde el punto de vista operativo, un programa puede iniciarse, finalizar o fallar sin comprometer necesariamente al sistema completo, ya que el kernel lo aísla del resto de los procesos. Un módulo, por el contrario, comparte el contexto interno del kernel; por ello, un error en su lógica, en sus accesos a memoria o en su sincronización puede degradar la estabilidad global del sistema e incluso provocar un bloqueo. En consecuencia, aunque ambos son piezas de software ejecutable, su nivel de privilegio, su modelo de interacción con el sistema y el impacto potencial de sus fallas son sustancialmente distintos.
+
+## 6. ¿Cómo puede ver una lista de las llamadas al sistema que realiza un simple `helloworld` en C?
+
+La forma más directa de observar las llamadas al sistema realizadas por un programa sencillo en C consiste en ejecutarlo mediante `strace`. Esta herramienta intercepta y muestra las `syscalls` invocadas por el proceso, así como sus argumentos y valores de retorno. Por ejemplo, luego de compilar un `helloworld`, puede ejecutarse `strace ./helloworld` para visualizar en pantalla llamadas tales como `execve`, `mmap`, `openat`, `write` y `exit_group`, entre otras.
+
+Si se desea conservar la traza para su análisis posterior, resulta conveniente redirigir la salida a un archivo, por ejemplo mediante `strace -o traza.txt ./helloworld`. A su vez, si el interés principal es obtener un resumen estadístico de las llamadas efectuadas, puede utilizarse `strace -c ./helloworld`. Desde una perspectiva metodológica, `strace` permite vincular el comportamiento observable de un programa de espacio de usuario con la interfaz concreta mediante la cual ese programa solicita servicios al kernel.
+
+## 7. ¿Qué es un segmentation fault? ¿Cómo lo maneja el kernel y cómo lo hace un programa?
+
+Un `segmentation fault` es una excepción provocada por un acceso inválido a memoria por parte de un proceso, por ejemplo al intentar desreferenciar un puntero nulo, escribir en una página sin permisos de escritura o acceder a una dirección que no pertenece a su espacio virtual válido. En esencia, representa una violación de la política de protección de memoria impuesta por la arquitectura y administrada por el sistema operativo.
+
+El kernel lo maneja a partir de la excepción de hardware correspondiente, típicamente un `page fault`. Cuando la MMU detecta un acceso no permitido, transfiere el control al kernel, que analiza si la referencia puede resolverse legítimamente o si constituye un acceso inválido. Si el acceso no es recuperable dentro del contexto del proceso, el kernel envía la señal `SIGSEGV` al programa responsable. El comportamiento por defecto del programa ante esa señal es finalizar su ejecución, y en muchos casos puede generarse además un `core dump` para depuración. No obstante, un programa también puede instalar un manejador para `SIGSEGV`; aun así, eso no convierte al error en algo seguro de continuar, sino que solo habilita tareas de registro, limpieza controlada o diagnóstico antes de terminar.
+
+## 8. ¿Se animan a intentar firmar un módulo de kernel? ¿Y documentar el proceso?
+
+<https://askubuntu.com/questions/770205/how-to-sign-kernel-modules-with-sign-file>
+
+## 9. Agregar evidencia de la compilación, carga y descarga de su propio módulo imprimiendo el nombre del equipo en los registros del kernel.
+
+## 10. ¿Qué pasa si mi compañero con `Secure Boot` habilitado intenta cargar un módulo firmado por mí?
+
+Si el módulo está firmado con una clave personal que no forma parte de la cadena de confianza del sistema de destino, la carga será rechazada en aquellos entornos donde `Secure Boot` implique verificación estricta de firmas de módulos. En ese escenario, no alcanza con que el módulo esté firmado: la clave pública correspondiente debe encontrarse registrada en un anillo de claves confiable para el kernel, por ejemplo mediante `MOK` o a través de claves incorporadas al propio sistema.
+
+En consecuencia, si un compañero intenta cargar un módulo firmado por otra persona pero cuya clave no fue previamente enrolada en su equipo, lo esperable es que el kernel deniegue la operación por firma no confiable. Solo en el caso de que esa clave haya sido incorporada explícitamente al conjunto de claves aceptadas podrá verificarse la firma y permitirse la carga del módulo.
+
+## 11. Dada la siguiente nota
+
+<https://arstechnica.com/security/2024/08/a-patch-microsoft-spent-2-years-preparing-is-making-a-mess-for-some-linux-users/>
+
+### a. ¿Cuál fue la consecuencia principal del parche de Microsoft sobre GRUB en sistemas con arranque dual (Linux y Windows)?
+
+Según la nota, la consecuencia principal fue que múltiples equipos configurados con arranque dual entre Windows y Linux dejaron de poder iniciar Linux cuando `Secure Boot` permanecía habilitado. El parche, publicado por Microsoft para mitigar una vulnerabilidad de GRUB, terminó provocando fallas de validación asociadas a `shim` y `SBAT`, lo que derivó en errores de política de seguridad durante el arranque.
+
+### b. ¿Qué implicancia tiene desactivar `Secure Boot` como solución al problema descrito en el artículo?
+
+La nota indica que desactivar `Secure Boot` es una alternativa para recuperar el arranque, pero también subraya que dicha decisión puede no ser aceptable según las necesidades de seguridad del usuario. El artículo incluso plantea que una mejor solución transitoria es eliminar la política `SBAT` aplicada por Microsoft, ya que ello conserva al menos parte de los beneficios de `Secure Boot`, aun cuando el sistema continúe expuesto a ataques que exploten `CVE-2022-2601`.
+
+### c. ¿Cuál es el propósito principal del `Secure Boot` en el proceso de arranque de un sistema?
+
+De acuerdo con la bibliografía indicada, el propósito principal de `Secure Boot` es impedir que, durante el arranque, el sistema cargue firmware o software malicioso no confiable. Es, por tanto, un mecanismo de integridad orientado a proteger la cadena de arranque antes de que el sistema operativo complete su inicialización.
+
 # Respuestas
 
 ## Desafío 1
@@ -135,3 +207,5 @@ Desde una perspectiva conceptual, `/dev` constituye el punto de encuentro entre 
   <https://access.redhat.com/documentation/es-es/red_hat_enterprise_linux/8/html/managing_monitoring_and_updating_the_kernel/signing-kernel-modules-for-secure-boot_managing-kernel-modules>
 - The Linux Kernel Module Programming Guide: <https://sysprog21.github.io/lkmpg/#what-is-a-kernel-module>
 - Opensource.com, *Dynamic tracing in Linux user and kernel space*: <https://opensource.com/article/17/7/dynamic-tracing-linux-user-and-kernel-space>
+- Ars Technica, *“Something has gone seriously wrong,” dual-boot systems warn after Microsoft update*:
+  <https://arstechnica.com/security/2024/08/a-patch-microsoft-spent-2-years-preparing-is-making-a-mess-for-some-linux-users/>
