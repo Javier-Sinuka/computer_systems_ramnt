@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+    echo "Uso: $(basename "$0") <nombre_archivo>"
+    echo "Ejemplo: $(basename "$0") informe_kernel"
+}
+
+if [[ $# -ne 1 ]]; then
+    usage
+    exit 1
+fi
+
+output_name="$1"
+output_name="${output_name%.txt}"
+output_file="${script_dir}/${output_name}.txt"
+
+collect_modules() {
+    if command -v lsmod >/dev/null 2>&1; then
+        lsmod
+    else
+        {
+            echo "Module                  Size  Used by"
+            awk '{printf "%-22s %-8s %s\n", $1, $2, $3}' /proc/modules
+        }
+    fi
+}
+
+collect_drivers() {
+    local driver_dir
+    local bus
+    local driver
+    local module_name
+    local devices
+    local device_count
+
+    printf "%-12s | %-30s | %-25s | %s\n" "BUS" "DRIVER" "MODULO ASOCIADO" "DISPOSITIVOS"
+    printf -- "---------------------------------------------------------------------------------------------------------------\n"
+
+    while IFS= read -r driver_dir; do
+        bus="$(basename "$(dirname "$(dirname "$driver_dir")")")"
+        driver="$(basename "$driver_dir")"
+
+        if [[ -L "${driver_dir}/module" ]]; then
+            module_name="$(basename "$(readlink -f "${driver_dir}/module")")"
+        else
+            module_name="builtin/no-visible"
+        fi
+
+        devices="$(find "$driver_dir" -mindepth 1 -maxdepth 1 -type l ! -name module -printf '%f ' | sed 's/[[:space:]]*$//')"
+        if [[ -n "$devices" ]]; then
+            device_count="$(wc -w <<< "$devices" | tr -d ' ')"
+        else
+            device_count="0"
+            devices="-"
+        fi
+
+        printf "%-12s | %-30s | %-25s | (%s) %s\n" "$bus" "$driver" "$module_name" "$device_count" "$devices"
+    done < <(find /sys/bus -mindepth 3 -maxdepth 3 -type d -path '*/drivers/*' | sort)
+}
+
+{
+    echo "Reporte de drivers y modulos del kernel"
+    echo "Generado: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    echo "Equipo: $(hostname)"
+    echo "Kernel: $(uname -r)"
+    echo
+    echo "=== MODULOS CARGADOS ==="
+    collect_modules
+    echo
+    echo "=== DRIVERS DETECTADOS EN /sys/bus ==="
+    collect_drivers
+} > "$output_file"
+
+echo "Archivo generado: $output_file"
