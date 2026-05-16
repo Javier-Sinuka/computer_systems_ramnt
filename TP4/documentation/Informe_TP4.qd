@@ -1,0 +1,66 @@
+.autopagebreak maxdepth:{1}
+.doctype {paged}
+
+.center
+    
+    #! Trabajo Práctico 4 - Sistemas de Computación
+    
+    !(600X600)[Alt](../../TP1/assets/Sello_institucional_V2.png)
+    
+    **Integrantes:**
+    - Brigido Tomás
+    - Siñuka Javier
+    - Tosolini Agustín
+
+.tableofcontents
+
+# Respuestas
+
+## Desafío 1
+
+### ¿Qué es `checkinstall` y para qué sirve?
+
+`checkinstall` es una herramienta orientada a sistemas GNU/Linux y otros entornos tipo Unix cuya finalidad es registrar una instalación realizada desde código fuente y transformarla en un paquete administrable por el sistema de paquetes de la distribución, típicamente `deb`, `rpm` o `tgz`. En lugar de ejecutar un `make install` convencional sin trazabilidad, `checkinstall` monitorea los archivos creados o modificados durante la instalación y construye, a partir de esa información, un paquete binario equivalente.
+
+Su utilidad principal radica en que permite mantener control administrativo sobre software compilado manualmente. Esto facilita la posterior desinstalación, la auditoría de archivos instalados, la replicación de la instalación en otras máquinas compatibles y una mejor integración con las políticas de mantenimiento del sistema. En términos prácticos, constituye una solución intermedia entre la instalación informal desde fuentes y el empaquetado completo mantenido por la distribución.
+
+## Desafío 2
+
+### ¿Qué funciones tiene disponibles un programa y qué funciones tiene disponibles un módulo?
+
+Un programa de espacio de usuario dispone, en primer término, de las funciones provistas por las bibliotecas de usuario, como la biblioteca estándar de C, y accede a servicios privilegiados por medio de llamadas al sistema. Por ello, operaciones como abrir archivos, reservar memoria dinámica, crear procesos o establecer comunicaciones de red se realizan a través de interfaces de usuario que luego son traducidas a syscalls hacia el kernel.
+
+Un módulo del kernel, en cambio, no utiliza la biblioteca estándar como entorno de ejecución principal, sino que se integra directamente con la API interna del kernel. Sus funciones disponibles son aquellas que el núcleo exporta explícitamente mediante símbolos y subsistemas internos, tales como `printk`, `kmalloc`, `kfree`, `copy_to_user`, `copy_from_user`, `request_irq`, o las rutinas de registro de dispositivos y controladores. En consecuencia, un módulo posee acceso a capacidades de mucho mayor privilegio, pero también opera bajo restricciones más severas: un error puede comprometer la estabilidad completa del sistema.
+
+### Espacio de usuario y espacio del kernel
+
+El sistema operativo separa la ejecución en dos dominios fundamentales. El espacio de usuario es el ámbito donde corren las aplicaciones ordinarias, con privilegios limitados y aislamiento entre procesos. Allí, cada programa dispone de su propio espacio de direcciones virtuales y no puede acceder directamente ni al hardware ni a la memoria del kernel.
+
+El espacio del kernel, por el contrario, es el dominio privilegiado desde el cual el sistema operativo administra memoria, interrupciones, planificación, dispositivos y políticas de protección. Los módulos cargables se ejecutan en este espacio y comparten el mismo contexto privilegiado del núcleo. La separación entre ambos dominios es esencial para la seguridad y la robustez del sistema, ya que impide que una falla en una aplicación común afecte de manera directa a la totalidad del sistema operativo.
+
+### Espacio de datos
+
+En un programa de usuario, el espacio de datos forma parte de su espacio de memoria virtual e incluye, de manera general, datos globales inicializados, datos globales no inicializados, heap y stack. Este espacio pertenece al proceso y queda protegido por mecanismos de aislamiento; si el programa finaliza, su memoria es recuperada por el sistema.
+
+En un módulo del kernel, en cambio, el espacio de datos no está aislado como el de un proceso ordinario, sino que queda incorporado al espacio global del kernel mientras el módulo permanezca cargado. Por ello, las estructuras de datos de un módulo deben diseñarse con especial cuidado respecto de concurrencia, sincronización y tiempo de vida. Una escritura inválida en ese contexto no compromete solamente al módulo, sino potencialmente al núcleo completo.
+
+### Drivers e investigación del contenido de `/dev`
+
+Un driver es un componente de software, frecuentemente implementado como módulo del kernel, cuya responsabilidad es mediar entre el sistema operativo y un dispositivo físico o lógico. Su función consiste en traducir operaciones genéricas del sistema en acciones concretas sobre el hardware o sobre una interfaz virtual. En Linux, muchos drivers se presentan al resto del sistema mediante archivos especiales de dispositivo.
+
+El directorio `/dev` contiene precisamente esos archivos especiales, conocidos como nodos de dispositivo. No almacenan datos convencionales como un archivo común; su propósito es ofrecer una interfaz uniforme para interactuar con dispositivos y servicios del sistema. Dentro de `/dev` es habitual distinguir dos grandes clases:
+
+- Dispositivos de carácter, que transfieren información como flujo secuencial de bytes, por ejemplo terminales, puertos serie o `/dev/null`.
+- Dispositivos de bloque, que operan sobre bloques direccionables, como discos y particiones.
+
+Cada entrada de `/dev` se asocia internamente con un número mayor (`major`) y un número menor (`minor`). El número mayor identifica el driver responsable de atender las operaciones sobre ese archivo de dispositivo, mientras que el menor permite distinguir instancias o subdispositivos administrados por ese mismo driver. En sistemas modernos, muchas de estas entradas son creadas dinámicamente por `udev`, en respuesta a los eventos de detección de hardware generados por el kernel.
+
+Desde una perspectiva conceptual, `/dev` constituye el punto de encuentro entre el espacio de usuario y los controladores del kernel: una aplicación abre, lee, escribe o configura un nodo de dispositivo, y el kernel redirige dichas operaciones al driver correspondiente. Este esquema materializa uno de los principios centrales de Unix y Linux: tratar múltiples recursos del sistema mediante una interfaz homogénea basada en archivos.
+
+## Bibliografía
+
+- Red Hat, *Restrictions Imposed by UEFI Secure Boot*: <https://access.redhat.com/articles/1351013>
+- Red Hat, *Managing kernel modules / signing kernel modules for secure boot*:
+  <https://access.redhat.com/documentation/es-es/red_hat_enterprise_linux/8/html/managing_monitoring_and_updating_the_kernel/signing-kernel-modules-for-secure-boot_managing-kernel-modules>
+- The Linux Kernel Module Programming Guide: <https://sysprog21.github.io/lkmpg/#what-is-a-kernel-module>
+- Opensource.com, *Dynamic tracing in Linux user and kernel space*: <https://opensource.com/article/17/7/dynamic-tracing-linux-user-and-kernel-space>
